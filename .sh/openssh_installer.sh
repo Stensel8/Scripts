@@ -36,15 +36,6 @@ readonly CONFIG_FILE="/etc/ssh/sshd_config"
 readonly ORIGINAL_CONFIG="${CONFIG_FILE}.original"
 readonly LOG_DIR="/tmp/openssh-logs-$$"
 
-# Color definitions
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
-readonly NC='\033[0m' # No Color
-readonly BOLD='\033[1m'
-
 # Create directories
 mkdir -p "$LOG_DIR"
 
