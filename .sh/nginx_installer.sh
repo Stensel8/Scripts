@@ -18,7 +18,7 @@
 #########################################################################
 
 # Safer error handling
-set -uo pipefail
+set -euo pipefail
 
 # Version definitions
 NGINX_VERSION="1.29.0"
