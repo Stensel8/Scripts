@@ -2,7 +2,7 @@
 
 ## About This Repository
 
-This repository contains a collection of enhanced and complex installer scripts that I use internally for automation (also with Terraform and Ansible). These scripts help me quickly deploy and switch between different versions of NGINX (as well as Docker, Ansible, Terraform, and Kubernetes) on various systems. The idea is to have a simple, one-command installation that can easily be updated or switched between versions when needed.
+This repository contains a collection of enhanced and complex installer scripts that I use internally for automation (also with Terraform and Ansible). These scripts help me quickly deploy and switch between different versions of NGINX, OpenSSH (as well as Docker, Ansible, Terraform, and Kubernetes) on various systems. The idea is to have a simple, one-command installation that can easily be updated or switched between versions when needed.
 
 ---
 
@@ -50,29 +50,31 @@ curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/nginx_ins
 
 **Note:** The script will detect existing NGINX installations and offer to remove them before installing the custom build.
 
-### openssl+openssh_installer.sh - Install
+### openssh_installer.sh - Install
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s install
 ```
-### openssl+openssh_installer.sh - Verify
+### openssh_installer.sh - Verify
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s verify
 ```
-### openssl+openssh_installer.sh - Remove
+### openssh_installer.sh - Remove
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s remove
 ```
 **Features:**
-- OpenSSL 3.5.1
-- OpenSSH 10.0 with enhanced security features
-- Improved cryptographic algorithm support
-- Hardened security configurations by default
-- Complete with all standard modules and extensions
+- Installs OpenSSH server from system package manager
+- Applies hardened security configuration
+- Generates strong host keys (ED25519 + RSA 3072-bit)
+- Removes weak legacy keys (DSA, ECDSA)
+- Enforces modern cryptographic algorithms
+- Disables insecure features and protocols
+- Compatible with Windows 11 and modern SSH clients
 
-**Note:** The script checks for existing OpenSSL and OpenSSH installations and will prompt before replacing them to avoid disrupting your system configuration.
+**Note:** The script installs OpenSSH from the system package manager and applies security hardening. It will warn if run over SSH and provides service management instructions.
 
 ### docker_installer.sh
 ```bash
@@ -146,19 +148,19 @@ curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/nginx_
   | sudo env CONFIRM=yes bash -s remove
 ```
 
-### openssl+openssh_installer.sh (Testing)
+### openssh_installer.sh (Testing)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s install
 ```
 #### Verify
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s verify
 ```
 #### Remove
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssl+openssh_installer.sh \
+curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/testing/.sh/openssh_installer.sh \
   | sudo env CONFIRM=yes bash -s remove
 ```
 
