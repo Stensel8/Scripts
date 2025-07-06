@@ -121,7 +121,15 @@ install_dependencies() {
         log_info "Detected Debian/Ubuntu system"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq &>"$LOG_DIR/apt-update.log"
-        apt-get install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname clear &>"$LOG_DIR/apt-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to update package repositories. Check $LOG_DIR/apt-update.log"
+            exit 1
+        fi
+        apt-get install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname &>"$LOG_DIR/apt-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to install build dependencies. Check $LOG_DIR/apt-install.log"
+            exit 1
+        fi
     elif command -v dnf &>/dev/null; then
         log_info "Detected Fedora/RHEL system"
         if dnf --version 2>/dev/null | grep -q "dnf5"; then
@@ -129,11 +137,27 @@ install_dependencies() {
         else
             dnf groupinstall -y "Development Tools" &>"$LOG_DIR/dnf-install.log"
         fi
-        dnf install -y pcre2-devel zlib-devel perl wget gcc make hostname clear &>"$LOG_DIR/dnf-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to install development tools. Check $LOG_DIR/dnf-install.log"
+            exit 1
+        fi
+        dnf install -y pcre2-devel zlib-devel perl wget gcc make hostname &>"$LOG_DIR/dnf-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to install build dependencies. Check $LOG_DIR/dnf-install.log"
+            exit 1
+        fi
     elif command -v yum &>/dev/null; then
         log_info "Detected CentOS/RHEL system"
         yum groupinstall -y "Development Tools" &>"$LOG_DIR/yum-install.log"
-        yum install -y pcre2-devel zlib-devel perl wget gcc make hostname clear &>"$LOG_DIR/yum-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to install development tools. Check $LOG_DIR/yum-install.log"
+            exit 1
+        fi
+        yum install -y pcre2-devel zlib-devel perl wget gcc make hostname &>"$LOG_DIR/yum-install.log"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to install build dependencies. Check $LOG_DIR/yum-install.log"
+            exit 1
+        fi
     else
         log_error "Unsupported package manager. This script requires apt, dnf, or yum."
         exit 1
@@ -672,6 +696,8 @@ install() {
             log_error "Non-interactive mode detected. Use: curl ... | CONFIRM=yes sudo bash -s install"
             exit 0
         fi
+    else
+        log_info "Installation confirmed via CONFIRM=yes environment variable"
     fi
     
     check_root
