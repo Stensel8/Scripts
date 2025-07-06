@@ -5,7 +5,7 @@
 # Run as Administrator
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Start het script opnieuw met administrator-rechten..." -ForegroundColor Yellow
+    Write-Host "Restarting the script with administrator rights..." -ForegroundColor Yellow
     # Herstart PowerShell als admin, met dezelfde parameters
     Start-Process -FilePath "PowerShell" `
                   -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" `

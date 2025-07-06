@@ -7,8 +7,8 @@
 # NGINX releases repository: https://github.com/nginx/nginx/releases
 # 
 # Version information:
-# - 1.29.x: mainline branch (newer features, less stable) - using 1.29.0
-# - 1.28.x: stable branch (recommended for production)
+# - 1.29.x: mainline branch (newer features, less stable) - this installer is using 1.29.0
+# - 1.28.x: stable branch (recommended for production)    - not used in this script 
 # 
 # OpenSSL releases repository: https://github.com/openssl/openssl/releases
 # - Latest stable: 3.5.1
@@ -45,6 +45,10 @@ readonly PURPLE='\033[0;35m'
 readonly NC='\033[0m' # No Color
 readonly BOLD='\033[1m'
 
+# Additional configuration
+readonly BACKUP_DIR="/root/nginx-backup-$(date +%Y%m%d-%H%M%S)"
+readonly SERVICE_NAME="nginx"
+
 # Create directories
 mkdir -p "$BUILD_DIR" "$LOG_DIR"
 
@@ -80,7 +84,7 @@ print_header() {
     echo
     echo -e "${BOLD}NGINX Compiler and Installer${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "NGINX ${NGINX_VERSION} with OpenSSL ${OPENSSL_VERSION}"
+    echo -e "Compiling NGINX ${NGINX_VERSION} with OpenSSL ${OPENSSL_VERSION}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
 }
@@ -113,25 +117,57 @@ verify_checksum() {
 install_dependencies() {
     log_step "Installing build dependencies"
     
-    if command -v dnf >/dev/null 2>&1; then
+    if command -v apt-get &>/dev/null; then
+        log_info "Detected Debian/Ubuntu system"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq &>"$LOG_DIR/apt-update.log"
+        apt-get install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname clear &>"$LOG_DIR/apt-install.log"
+    elif command -v dnf &>/dev/null; then
         log_info "Detected Fedora/RHEL system"
         if dnf --version 2>/dev/null | grep -q "dnf5"; then
-            dnf install -y @development-tools
+            dnf install -y @development-tools &>"$LOG_DIR/dnf-install.log"
         else
-            dnf groupinstall -y "Development Tools"
+            dnf groupinstall -y "Development Tools" &>"$LOG_DIR/dnf-install.log"
         fi
-        dnf install -y pcre2-devel zlib-devel perl wget gcc make
-    elif command -v apt >/dev/null 2>&1; then
-        log_info "Detected Ubuntu/Debian system"
-        export DEBIAN_FRONTEND=noninteractive
-        apt update
-        apt install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make
+        dnf install -y pcre2-devel zlib-devel perl wget gcc make hostname clear &>"$LOG_DIR/dnf-install.log"
+    elif command -v yum &>/dev/null; then
+        log_info "Detected CentOS/RHEL system"
+        yum groupinstall -y "Development Tools" &>"$LOG_DIR/yum-install.log"
+        yum install -y pcre2-devel zlib-devel perl wget gcc make hostname clear &>"$LOG_DIR/yum-install.log"
     else
-        log_error "Unsupported package manager"
+        log_error "Unsupported package manager. This script requires apt, dnf, or yum."
         exit 1
     fi
     
-    log_success "Dependencies installed"
+    log_success "Build dependencies installed"
+}
+
+# Create backup of existing NGINX installation
+backup_existing() {
+    log_step "Creating backup of existing installation"
+    
+    mkdir -p "$BACKUP_DIR"
+    
+    # Backup existing NGINX configuration
+    if [ -d "/etc/nginx" ]; then
+        cp -a /etc/nginx "$BACKUP_DIR/"
+        log_info "NGINX configuration backed up to $BACKUP_DIR"
+    fi
+    
+    # Backup existing NGINX binary
+    if [ -f "/usr/sbin/nginx" ]; then
+        cp /usr/sbin/nginx "$BACKUP_DIR/"
+        log_info "NGINX binary backed up to $BACKUP_DIR"
+    fi
+    
+    # Save current NGINX service status
+    if systemctl is-active --quiet nginx &>/dev/null; then
+        echo "nginx was active" > "$BACKUP_DIR/service_status.txt"
+    else
+        echo "nginx was inactive" > "$BACKUP_DIR/service_status.txt"
+    fi
+    
+    log_success "Backup created successfully"
 }
 
 # Download and verify sources
@@ -519,7 +555,36 @@ EOF
     
     systemctl daemon-reload
     systemctl enable nginx
-    log_info "Created systemd service"
+    log_info "Created and enabled systemd service"
+}
+
+# Test NGINX configuration
+test_configuration() {
+    log_step "Testing NGINX configuration"
+    
+    # Test configuration syntax
+    if nginx -t 2>/dev/null; then
+        log_success "NGINX configuration syntax is valid"
+    else
+        log_error "NGINX configuration has syntax errors"
+        log_info "Running configuration test with verbose output:"
+        nginx -t
+        return 1
+    fi
+    
+    # Check if NGINX service can start
+    if systemctl is-active --quiet nginx; then
+        log_info "NGINX service is already running"
+    else
+        if systemctl start nginx; then
+            log_success "NGINX service started successfully"
+        else
+            log_error "Failed to start NGINX service"
+            return 1
+        fi
+    fi
+    
+    log_success "NGINX configuration test passed"
 }
 
 # Show installation summary
@@ -528,32 +593,63 @@ show_summary() {
     echo -e "${BOLD}Installation Summary${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    if command -v nginx >/dev/null 2>&1; then
-        local nginx_version=$(nginx -v 2>&1 | grep -o 'nginx/[0-9.]*')
-        local openssl_version=$(nginx -V 2>&1 | grep -o 'built with OpenSSL [0-9.]*' | cut -d' ' -f4)
+    if command -v nginx &>/dev/null; then
+        local nginx_version=$(nginx -v 2>&1 | grep -o 'nginx/[0-9.]*' || echo "Unknown")
+        local openssl_version=$(nginx -V 2>&1 | grep -o 'built with OpenSSL [0-9.]*' | cut -d' ' -f4 || echo "Unknown")
         
-        echo -e "${GREEN}✓${NC} NGINX ${nginx_version} installed"
-        echo -e "${GREEN}✓${NC} OpenSSL ${openssl_version} with HTTP/3 support"
-        echo -e "${GREEN}✓${NC} Systemd service created"
+        echo -e "${GREEN}✓${NC} NGINX compiled and installed: $nginx_version"
+        echo -e "${GREEN}✓${NC} OpenSSL integration: $openssl_version"
+        echo -e "${GREEN}✓${NC} HTTP/3 support with QUIC protocol"
+        echo -e "${GREEN}✓${NC} Modern security configuration applied"
+        echo -e "${GREEN}✓${NC} Systemd service created and enabled"
+        
+        if systemctl is-active --quiet nginx; then
+            echo -e "${GREEN}✓${NC} NGINX service is running"
+        else
+            echo -e "${YELLOW}!${NC} NGINX service is not running"
+        fi
     else
         echo -e "${RED}✗${NC} NGINX installation may have failed"
     fi
     
     echo
-    echo -e "${BOLD}Quick Start${NC}"
+    echo -e "${BOLD}Service Management${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "Start NGINX:    ${BLUE}sudo systemctl start nginx${NC}"
     echo -e "Stop NGINX:     ${BLUE}sudo systemctl stop nginx${NC}"
     echo -e "Restart NGINX:  ${BLUE}sudo systemctl restart nginx${NC}"
+    echo -e "Enable NGINX:   ${BLUE}sudo systemctl enable nginx${NC}"
+    echo -e "Status:         ${BLUE}sudo systemctl status nginx${NC}"
     echo -e "Test config:    ${BLUE}sudo nginx -t${NC}"
-    echo -e "View logs:      ${BLUE}sudo tail -f /var/log/nginx/error.log${NC}"
+    echo -e "Reload config:  ${BLUE}sudo nginx -s reload${NC}"
     echo
-    echo -e "Configuration:  ${BLUE}/etc/nginx/nginx.conf${NC}"
+    echo -e "${BOLD}Connection Information${NC}"
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "HTTP Port:      ${BLUE}80${NC}"
+    echo -e "HTTPS Port:     ${BLUE}443${NC}"
+    echo -e "Config file:    ${BLUE}/etc/nginx/nginx.conf${NC}"
     echo -e "Site configs:   ${BLUE}/etc/nginx/conf.d/${NC}"
+    echo -e "Document root:  ${BLUE}/usr/share/nginx/html${NC}"
+    echo -e "Log files:      ${BLUE}/var/log/nginx/${NC}"
+    echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
+    
+    # Show server IP addresses
+    echo -e "Server IPs:     ${BLUE}$(hostname -I | tr ' ' '\n' | head -3 | tr '\n' ' ')${NC}"
+    echo
+    echo -e "${BOLD}Security Notes${NC}"
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "• Modern SSL/TLS configuration with TLS 1.2/1.3"
+    echo -e "• HTTP/3 support with QUIC protocol enabled"
+    echo -e "• Security headers configured (X-Frame-Options, X-Content-Type-Options)"
+    echo -e "• Gzip compression enabled for better performance"
+    echo -e "• Built with latest OpenSSL for enhanced security"
+    echo -e "• Strong SSL ciphers and protocols enforced"
+    echo
+    echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(hostname -I | awk '{print $1}')${NC}"
     echo
 }
 
-# Install NGINX
+# Compile and install NGINX with hardened configuration
 install() {
     log_info "Starting NGINX ${NGINX_VERSION} installation with OpenSSL ${OPENSSL_VERSION}"
     
@@ -561,6 +657,7 @@ install() {
     if [[ -n "${SSH_CONNECTION:-}" ]] && [[ "${FORCE_SSH_INSTALL:-}" != "1" ]]; then
         log_error "Running in SSH session! This will affect web services."
         log_warn "If you have console access, run: FORCE_SSH_INSTALL=1 $0 install"
+        log_warn "Or use 'screen' or 'tmux' to maintain session during restart"
         exit 1
     fi
     
@@ -568,7 +665,7 @@ install() {
     if [[ "${CONFIRM:-}" != "yes" ]]; then
         if [[ -t 0 ]]; then
             # Interactive mode
-            read -rp "Proceed with NGINX installation? This will compile and install NGINX. [y/N] " answer
+            read -rp "Proceed with NGINX installation? This will compile and install NGINX with OpenSSL. [y/N] " answer
             [[ "${answer,,}" != "y" ]] && { log_error "Installation cancelled"; exit 0; }
         else
             # Non-interactive mode (piped)
@@ -580,20 +677,39 @@ install() {
     check_root
     print_header
     
+    backup_existing
     install_dependencies
     download_sources
     build_openssl
     build_nginx
     install_nginx
+    test_configuration
+    
+    # Enable and start NGINX service
+    systemctl enable nginx
+    systemctl restart nginx
     
     show_summary
     
     log_success "NGINX installation completed successfully!"
 }
 
-# Remove NGINX installation
+# Remove NGINX installation and restore original configuration
 remove() {
     log_info "Removing NGINX installation..."
+    
+    # Confirm removal
+    if [[ "${CONFIRM:-}" != "yes" ]]; then
+        if [[ -t 0 ]]; then
+            # Interactive mode
+            read -rp "Remove NGINX installation? This will uninstall NGINX and clean up all files. [y/N] " answer
+            [[ "${answer,,}" != "y" ]] && { log_error "Removal cancelled"; exit 0; }
+        else
+            # Non-interactive mode (piped)
+            log_error "Non-interactive mode detected. Use: curl ... | CONFIRM=yes sudo bash -s remove"
+            exit 0
+        fi
+    fi
     
     # Stop NGINX service if running
     if systemctl is-active --quiet nginx 2>/dev/null; then
@@ -629,9 +745,11 @@ remove() {
     fi
     
     log_success "NGINX installation removed successfully"
+    log_warn "NGINX service has been stopped and disabled"
+    log_info "Configuration backup remains in: $BACKUP_DIR"
 }
 
-# Verify NGINX installation
+# Verify NGINX installation and configuration
 verify() {
     log_info "Verifying NGINX installation..."
     
@@ -639,8 +757,8 @@ verify() {
     
     # Check if NGINX binary exists and is executable
     if [[ -x /usr/sbin/nginx ]]; then
-        local nginx_version=$(nginx -v 2>&1 | grep -o 'nginx/[0-9.]*' || echo "unknown")
-        log_success "NGINX binary: ${nginx_version}"
+        local nginx_version=$(nginx -v 2>&1 | grep -o 'nginx/[0-9.]*' || echo "Unknown")
+        log_success "NGINX binary installed: $nginx_version"
     else
         log_error "NGINX binary not found or not executable"
         ((issues++))
@@ -648,11 +766,13 @@ verify() {
     
     # Check configuration file
     if [[ -f /etc/nginx/nginx.conf ]]; then
-        if nginx -t >/dev/null 2>&1; then
-            log_success "NGINX configuration is valid"
+        log_success "NGINX configuration file exists: /etc/nginx/nginx.conf"
+        
+        # Test configuration
+        if nginx -t 2>/dev/null; then
+            log_success "NGINX configuration syntax is valid"
         else
-            log_error "NGINX configuration has errors:"
-            nginx -t
+            log_error "NGINX configuration has syntax errors"
             ((issues++))
         fi
     else
@@ -660,28 +780,23 @@ verify() {
         ((issues++))
     fi
     
-    # Check systemd service
-    if [[ -f /etc/systemd/system/nginx.service ]]; then
-        if systemctl is-enabled --quiet nginx 2>/dev/null; then
-            log_success "NGINX service is enabled"
-        else
-            log_warn "NGINX service is not enabled"
-        fi
-        
-        if systemctl is-active --quiet nginx 2>/dev/null; then
-            log_success "NGINX service is running"
-        else
-            log_warn "NGINX service is not running"
-        fi
+    # Check service status
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        log_success "NGINX service is running"
     else
-        log_error "NGINX systemd service not found"
-        ((issues++))
+        log_warn "NGINX service is not running"
+    fi
+    
+    if systemctl is-enabled --quiet nginx 2>/dev/null; then
+        log_success "NGINX service is enabled"
+    else
+        log_warn "NGINX service is not enabled"
     fi
     
     # Check OpenSSL integration
     if nginx -V 2>&1 | grep -q "built with OpenSSL"; then
-        local openssl_version=$(nginx -V 2>&1 | grep -o 'built with OpenSSL [0-9.]*' | cut -d' ' -f4)
-        log_success "OpenSSL integration: ${openssl_version}"
+        local openssl_version=$(nginx -V 2>&1 | grep -o 'built with OpenSSL [0-9.]*' | cut -d' ' -f4 || echo "Unknown")
+        log_success "OpenSSL integration: $openssl_version"
     else
         log_error "OpenSSL integration not found"
         ((issues++))
@@ -711,6 +826,16 @@ verify() {
     else
         log_error "NGINX user missing"
         ((issues++))
+    fi
+    
+    # Check listening ports
+    if command -v ss &>/dev/null; then
+        local http_ports=$(ss -tlnp | grep :80 | wc -l)
+        if [ "$http_ports" -gt 0 ]; then
+            log_success "NGINX is listening on port 80"
+        else
+            log_warn "NGINX is not listening on port 80"
+        fi
     fi
     
     echo
@@ -756,9 +881,17 @@ main() {
             echo
             echo "Examples:"
             echo "  $0 install                    # Interactive installation"
-            echo "  CONFIRM=yes $0 install       # Non-interactive installation"
+            echo "  CONFIRM=yes $0 install        # Non-interactive installation"
             echo "  $0 verify                     # Check installation"
             echo "  $0 remove                     # Remove installation"
+            echo
+            echo "Features:"
+            echo "  • Compiles NGINX from source with latest OpenSSL"
+            echo "  • HTTP/3 support with QUIC protocol"
+            echo "  • Modern security configurations"
+            echo "  • Optimized for performance and security"
+            echo "  • Systemd service integration"
+            echo "  • Comprehensive verification and cleanup"
             echo
             ;;
     esac
