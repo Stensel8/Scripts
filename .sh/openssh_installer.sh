@@ -81,13 +81,13 @@ install_openssh() {
         log_info "Detected Debian/Ubuntu system"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq &>"$LOG_DIR/apt-update.log"
-        apt-get install -y openssh-server hostname clear &>"$LOG_DIR/apt-install.log"
+        apt-get install -y openssh-server hostname &>"$LOG_DIR/apt-install.log"
     elif command -v dnf &>/dev/null; then
         log_info "Detected Fedora/RHEL system"
-        dnf install -y openssh-server hostname clear &>"$LOG_DIR/dnf-install.log"
+        dnf install -y openssh-server hostname &>"$LOG_DIR/dnf-install.log"
     elif command -v yum &>/dev/null; then
         log_info "Detected CentOS/RHEL system"
-        yum install -y openssh-server hostname clear &>"$LOG_DIR/yum-install.log"
+        yum install -y openssh-server hostname &>"$LOG_DIR/yum-install.log"
     else
         log_error "Unsupported package manager. This script requires apt, dnf, or yum."
         exit 1
