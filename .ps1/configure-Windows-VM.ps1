@@ -3,7 +3,6 @@
 # This script is tested for a Windows 11 VM and Windows Server 2025. It may work on other versions, but some services may be different.
 
 # Run as Administrator
-
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Start het script opnieuw met administrator-rechten..." -ForegroundColor Yellow
