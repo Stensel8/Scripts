@@ -159,6 +159,26 @@ generate_host_keys() {
     log_success "Host keys configured securely"
 }
 
+# Create privilege separation directory
+create_privilege_separation_dir() {
+    log_step "Creating privilege separation directory"
+    
+    # Create /run/sshd directory if it doesn't exist
+    if [ ! -d "/run/sshd" ]; then
+        mkdir -p /run/sshd
+        chmod 755 /run/sshd
+        chown root:root /run/sshd
+        log_info "Created /run/sshd directory with proper permissions"
+    else
+        # Ensure proper permissions even if directory exists
+        chmod 755 /run/sshd
+        chown root:root /run/sshd
+        log_info "Verified /run/sshd directory permissions"
+    fi
+    
+    log_success "Privilege separation directory configured"
+}
+
 # Apply hardened SSH configuration
 configure_ssh() {
     log_step "Applying hardened SSH configuration"
@@ -378,6 +398,7 @@ install() {
     backup_config
     install_openssh
     generate_host_keys
+    create_privilege_separation_dir
     configure_ssh
     configure_firewall
     test_configuration
