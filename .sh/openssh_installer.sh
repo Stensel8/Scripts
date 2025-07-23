@@ -36,6 +36,24 @@ readonly CONFIG_FILE="/etc/ssh/sshd_config"
 readonly ORIGINAL_CONFIG="${CONFIG_FILE}.original"
 readonly LOG_DIR="/tmp/openssh-logs-$$"
 
+# Detect SSH service name (differs between distributions)
+detect_ssh_service() {
+    if systemctl list-unit-files | grep -q "^ssh\.service"; then
+        echo "ssh"
+    elif systemctl list-unit-files | grep -q "^sshd\.service"; then
+        echo "sshd"
+    else
+        # Default fallback
+        if command -v apt-get &>/dev/null; then
+            echo "ssh"
+        else
+            echo "sshd"
+        fi
+    fi
+}
+
+readonly SSH_SERVICE=$(detect_ssh_service)
+
 # Create directories
 mkdir -p "$LOG_DIR"
 
@@ -115,7 +133,7 @@ backup_config() {
     fi
     
     # Save current SSH service status
-    systemctl is-active sshd &>/dev/null && echo "sshd was active" > "$BACKUP_DIR/service_status.txt" || echo "sshd was inactive" > "$BACKUP_DIR/service_status.txt"
+    systemctl is-active "$SSH_SERVICE" &>/dev/null && echo "$SSH_SERVICE was active" > "$BACKUP_DIR/service_status.txt" || echo "$SSH_SERVICE was inactive" > "$BACKUP_DIR/service_status.txt"
     
     log_success "Configuration backup completed"
 }
@@ -262,6 +280,10 @@ EOF
     # Set proper permissions
     chmod 644 "$CONFIG_FILE"
     
+    # Create privilege separation directory required by sshd
+    mkdir -p /run/sshd
+    chmod 0755 /run/sshd
+    
     log_success "Hardened SSH configuration applied"
 }
 
@@ -299,10 +321,10 @@ test_configuration() {
     fi
     
     # Check if SSH service can start
-    if systemctl is-active --quiet sshd; then
+    if systemctl is-active --quiet "$SSH_SERVICE"; then
         log_info "SSH service is already running"
     else
-        if systemctl start sshd; then
+        if systemctl start "$SSH_SERVICE"; then
             log_success "SSH service started successfully"
         else
             log_error "Failed to start SSH service"
@@ -326,7 +348,7 @@ show_summary() {
         echo -e "${GREEN}✓${NC} Strong host keys generated (ED25519 + RSA 3072)"
         echo -e "${GREEN}✓${NC} Weak legacy keys removed"
         
-        if systemctl is-active --quiet sshd; then
+        if systemctl is-active --quiet "$SSH_SERVICE"; then
             echo -e "${GREEN}✓${NC} SSH service is running"
         else
             echo -e "${YELLOW}!${NC} SSH service is not running"
@@ -338,16 +360,17 @@ show_summary() {
     echo
     echo -e "${BOLD}Service Management${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Start SSH:      ${BLUE}sudo systemctl start sshd${NC}"
-    echo -e "Stop SSH:       ${BLUE}sudo systemctl stop sshd${NC}"
-    echo -e "Restart SSH:    ${BLUE}sudo systemctl restart sshd${NC}"
-    echo -e "Enable SSH:     ${BLUE}sudo systemctl enable sshd${NC}"
-    echo -e "Status:         ${BLUE}sudo systemctl status sshd${NC}"
+    echo -e "Start SSH:      ${BLUE}sudo systemctl start $SSH_SERVICE${NC}"
+    echo -e "Stop SSH:       ${BLUE}sudo systemctl stop $SSH_SERVICE${NC}"
+    echo -e "Restart SSH:    ${BLUE}sudo systemctl restart $SSH_SERVICE${NC}"
+    echo -e "Enable SSH:     ${BLUE}sudo systemctl enable $SSH_SERVICE${NC}"
+    echo -e "Status:         ${BLUE}sudo systemctl status $SSH_SERVICE${NC}"
     echo -e "Test config:    ${BLUE}sudo sshd -t${NC}"
     echo
     echo -e "${BOLD}Connection Information${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "SSH Port:       ${BLUE}22${NC}"
+    echo -e "Service name:   ${BLUE}$SSH_SERVICE${NC}"
     echo -e "Config file:    ${BLUE}$CONFIG_FILE${NC}"
     echo -e "Host keys:      ${BLUE}/etc/ssh/ssh_host_*_key${NC}"
     echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
@@ -404,8 +427,8 @@ install() {
     test_configuration
     
     # Enable and start SSH service
-    systemctl enable sshd
-    systemctl restart sshd
+    systemctl enable "$SSH_SERVICE"
+    systemctl restart "$SSH_SERVICE"
     
     show_summary
     
@@ -430,15 +453,15 @@ remove() {
     fi
     
     # Stop SSH service
-    if systemctl is-active --quiet sshd; then
+    if systemctl is-active --quiet "$SSH_SERVICE"; then
         log_info "Stopping SSH service..."
-        systemctl stop sshd
+        systemctl stop "$SSH_SERVICE"
     fi
     
     # Disable SSH service
-    if systemctl is-enabled --quiet sshd; then
+    if systemctl is-enabled --quiet "$SSH_SERVICE"; then
         log_info "Disabling SSH service..."
-        systemctl disable sshd
+        systemctl disable "$SSH_SERVICE"
     fi
     
     # Restore original configuration if it exists
@@ -494,13 +517,13 @@ verify() {
     fi
     
     # Check service status
-    if systemctl is-active --quiet sshd; then
+    if systemctl is-active --quiet "$SSH_SERVICE"; then
         log_success "SSH service is running"
     else
         log_warn "SSH service is not running"
     fi
     
-    if systemctl is-enabled --quiet sshd; then
+    if systemctl is-enabled --quiet "$SSH_SERVICE"; then
         log_success "SSH service is enabled"
     else
         log_warn "SSH service is not enabled"
@@ -535,7 +558,7 @@ verify() {
     fi
     
     # Check directories and permissions
-    local dirs=("/etc/ssh" "/var/log")
+    local dirs=("/etc/ssh" "/var/log" "/run/sshd")
     for dir in "${dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             log_success "Directory exists: $dir"
@@ -544,6 +567,9 @@ verify() {
             ((issues++))
         fi
     done
+
+    mkdir -p /run/sshd
+    chmod 0755 /run/sshd
     
     echo
     if [[ $issues -eq 0 ]]; then
