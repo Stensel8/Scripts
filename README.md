@@ -24,7 +24,7 @@ Choose between the **main** branch (stable) or **testing** branch (latest featur
 
 ### nginx_installer.sh
 
-This script installs a custom compiled NGINX with OpenSSL 3.5.1 for improved HTTP/3 and QUIC support. The build includes performance optimizations.
+This script installs a custom compiled NGINX with OpenSSL 3.5.2 for improved HTTP/3 and QUIC support. The build includes performance optimizations.
 
 ### nginx_installer.sh - Install
 ```bash
@@ -44,8 +44,8 @@ curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/nginx_ins
 
 **Features:**
 - NGINX 1.29.0
-- OpenSSL 3.5.1 with enhanced QUIC support
-- HTTP/3 module enabled
+- OpenSSL 3.5.2 with enhanced QUIC support
+- HTTP/3 modules
 - Full feature set including mail, stream, and all standard modules
 
 **Note:** The script will detect existing NGINX installations and offer to remove them before installing the custom build.
