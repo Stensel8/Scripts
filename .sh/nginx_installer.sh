@@ -29,7 +29,7 @@ ZLIB_VERSION="1.3.1"
 # SHA256 checksums for verification
 # These are the actual checksums for the specified versions
 NGINX_SHA256="109754dfe8e5169a7a0cf0db6718e7da2db495753308f933f161e525a579a664"
-OPENSSL_SHA256="9135fb5d2fe846a9e776742ee624c447e2e566b7b6744eaa9c576343e6fdbc32"
+OPENSSL_SHA256="c53a47e5e441c930c3928cf7bf6fb00e5d129b630e0aa873b08258656e7345ec"
 
 # Build configuration
 BUILD_DIR="/tmp/nginx-build-$$"
