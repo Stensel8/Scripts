@@ -11,7 +11,7 @@
 # - 1.28.x: stable branch (recommended for production)    - not used in this script 
 # 
 # OpenSSL releases repository: https://github.com/openssl/openssl/releases
-# - Latest stable: 3.5.1
+# - Latest stable: 3.5.2
 # 
 # This script downloads source code, verifies checksums, compiles, and
 # installs NGINX with the latest OpenSSL for HTTP/3 support.
@@ -22,14 +22,14 @@ set -euo pipefail
 
 # Version definitions
 NGINX_VERSION="1.29.0"
-OPENSSL_VERSION="3.5.1"
+OPENSSL_VERSION="3.5.2"
 PCRE2_VERSION="10.45"
 ZLIB_VERSION="1.3.1"
 
 # SHA256 checksums for verification
 # These are the actual checksums for the specified versions
 NGINX_SHA256="109754dfe8e5169a7a0cf0db6718e7da2db495753308f933f161e525a579a664"
-OPENSSL_SHA256="529043b15cffa5f36077a4d0af83f3de399807181d607441d734196d889b641f"
+OPENSSL_SHA256="c53a47e5e441c930c3928cf7bf6fb00e5d129b630e0aa873b08258656e7345ec"
 
 # Build configuration
 BUILD_DIR="/tmp/nginx-build-$$"
