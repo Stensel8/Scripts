@@ -7,7 +7,7 @@
 # NGINX releases repository: https://github.com/nginx/nginx/releases
 # 
 # Version information:
-# - 1.29.x: mainline branch (newer features, less stable) - this installer is using 1.29.0
+# - 1.29.x: mainline branch (newer features, less stable) - this installer is using 1.29.1
 # - 1.28.x: stable branch (recommended for production)    - not used in this script 
 # 
 # OpenSSL releases repository: https://github.com/openssl/openssl/releases

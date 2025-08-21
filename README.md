@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/Stensel8/scripts/main/.sh/nginx_ins
 ```
 
 **Features:**
-- NGINX 1.29.0
+- NGINX 1.29.1
 - OpenSSL 3.5.2 with enhanced QUIC support
 - HTTP/3 modules
 - Full feature set including mail, stream, and all standard modules
