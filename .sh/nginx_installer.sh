@@ -21,14 +21,14 @@
 set -euo pipefail
 
 # Version definitions
-NGINX_VERSION="1.29.0"
+NGINX_VERSION="1.29.1"
 OPENSSL_VERSION="3.5.2"
 PCRE2_VERSION="10.45"
 ZLIB_VERSION="1.3.1"
 
 # SHA256 checksums for verification
 # These are the actual checksums for the specified versions
-NGINX_SHA256="109754dfe8e5169a7a0cf0db6718e7da2db495753308f933f161e525a579a664"
+NGINX_SHA256="c589f7e7ed801ddbd904afbf3de26ae24eb0cce27c7717a2e94df7fb12d6ad27"
 OPENSSL_SHA256="c53a47e5e441c930c3928cf7bf6fb00e5d129b630e0aa873b08258656e7345ec"
 
 # Build configuration
