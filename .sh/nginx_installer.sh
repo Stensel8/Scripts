@@ -393,12 +393,14 @@ install_nginx() {
 
     log_info "Installing dynamic modules"
     if [ -d "$BUILD_DIR/nginx-${NGINX_VERSION}/objs" ]; then
-        # Try copying directly from objs
-        cp "$BUILD_DIR/nginx-${NGINX_VERSION}/objs"/*.so /etc/nginx/modules/ 2>/dev/null || {
+        # Try copying directly from objs using find to avoid wildcard issues
+        if find "$BUILD_DIR/nginx-${NGINX_VERSION}/objs" -maxdepth 1 -type f -name "*.so" | grep -q .; then
+            find "$BUILD_DIR/nginx-${NGINX_VERSION}/objs" -maxdepth 1 -type f -name "*.so" -exec cp {} /etc/nginx/modules/ \;
+        else
             log_warn "No dynamic modules found in objs directory"
             # Fallback: search the entire build tree for built modules
             find "$BUILD_DIR" -type f -name "*.so" -exec cp {} /etc/nginx/modules/ \; 2>/dev/null || true
-        }
+        fi
 
         # Set correct permissions (best-effort)
         chown root:root /etc/nginx/modules/*.so 2>/dev/null || true
