@@ -36,6 +36,14 @@ BUILD_DIR="/tmp/nginx-build-$$"
 PREFIX="/usr/local/nginx"
 LOG_DIR="/tmp/nginx-build-logs-$$"
 
+# Third-party dynamic modules (repos and refs)
+GEOIP2_MODULE_REPO="https://github.com/leev/ngx_http_geoip2_module.git"
+GEOIP2_MODULE_REF="master"
+HEADERS_MORE_REPO="https://github.com/openresty/headers-more-nginx-module.git"
+HEADERS_MORE_REF="master"
+ZSTD_MODULE_REPO="https://github.com/tokers/zstd-nginx-module.git"
+ZSTD_MODULE_REF="master"
+
 # Color definitions
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -125,7 +133,7 @@ install_dependencies() {
             log_error "Failed to update package repositories. Check $LOG_DIR/apt-update.log"
             exit 1
         fi
-        apt-get install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname &>"$LOG_DIR/apt-install.log"
+    apt-get install -y build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname git libmaxminddb-dev libmaxminddb0 mmdb-bin zstd libzstd-dev &>"$LOG_DIR/apt-install.log"
         if [ $? -ne 0 ]; then
             log_error "Failed to install build dependencies. Check $LOG_DIR/apt-install.log"
             exit 1
@@ -141,7 +149,7 @@ install_dependencies() {
             log_error "Failed to install development tools. Check $LOG_DIR/dnf-install.log"
             exit 1
         fi
-        dnf install -y pcre2-devel zlib-devel perl wget gcc make hostname &>"$LOG_DIR/dnf-install.log"
+    dnf install -y pcre2-devel zlib-devel perl wget gcc make hostname git libmaxminddb libmaxminddb-devel zstd libzstd libzstd-devel &>"$LOG_DIR/dnf-install.log"
         if [ $? -ne 0 ]; then
             log_error "Failed to install build dependencies. Check $LOG_DIR/dnf-install.log"
             exit 1
@@ -153,7 +161,7 @@ install_dependencies() {
             log_error "Failed to install development tools. Check $LOG_DIR/yum-install.log"
             exit 1
         fi
-        yum install -y pcre2-devel zlib-devel perl wget gcc make hostname &>"$LOG_DIR/yum-install.log"
+    yum install -y pcre2-devel zlib-devel perl wget gcc make hostname git libmaxminddb libmaxminddb-devel zstd libzstd libzstd-devel &>"$LOG_DIR/yum-install.log"
         if [ $? -ne 0 ]; then
             log_error "Failed to install build dependencies. Check $LOG_DIR/yum-install.log"
             exit 1
@@ -202,16 +210,35 @@ download_sources() {
     
     # Download sources
     log_info "Downloading NGINX ${NGINX_VERSION}"
-    wget -q "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -O "nginx-${NGINX_VERSION}.tar.gz"
+    wget -q --tries=3 --timeout=30 -O "nginx-${NGINX_VERSION}.tar.gz" "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" || {
+        log_error "Failed to download NGINX ${NGINX_VERSION}"
+        exit 1
+    }
     
     log_info "Downloading OpenSSL ${OPENSSL_VERSION}"
-    wget -q "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+    # Prefer official OpenSSL source, fallback to versioned archive and then GitHub releases
+    if ! wget -q --tries=3 --timeout=30 -O "openssl-${OPENSSL_VERSION}.tar.gz" "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"; then
+        log_warn "Primary OpenSSL download failed, trying old releases directory"
+        if ! wget -q --tries=3 --timeout=30 -O "openssl-${OPENSSL_VERSION}.tar.gz" "https://www.openssl.org/source/old/${OPENSSL_VERSION%.*}/openssl-${OPENSSL_VERSION}.tar.gz"; then
+            log_warn "OpenSSL old releases directory failed, trying GitHub releases"
+            wget -q --tries=3 --timeout=30 -O "openssl-${OPENSSL_VERSION}.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" || {
+                log_error "Failed to download OpenSSL ${OPENSSL_VERSION} from all sources"
+                exit 1
+            }
+        fi
+    fi
     
     log_info "Downloading PCRE2 ${PCRE2_VERSION}"
-    wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
+    wget -q --tries=3 --timeout=30 -O "pcre2-${PCRE2_VERSION}.tar.gz" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz" || {
+        log_error "Failed to download PCRE2 ${PCRE2_VERSION}"
+        exit 1
+    }
     
     log_info "Downloading zlib ${ZLIB_VERSION}"
-    wget -q "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz"
+    wget -q --tries=3 --timeout=30 -O "zlib-${ZLIB_VERSION}.tar.gz" "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" || {
+        log_error "Failed to download zlib ${ZLIB_VERSION}"
+        exit 1
+    }
     
     # Verify checksums
     log_info "Verifying checksums"
@@ -225,6 +252,16 @@ download_sources() {
     tar xf "pcre2-${PCRE2_VERSION}.tar.gz" || exit 1
     tar xf "zlib-${ZLIB_VERSION}.tar.gz" || exit 1
     
+    # Clone third-party dynamic modules
+    log_info "Cloning GeoIP2 module"
+    git clone --depth 1 "$GEOIP2_MODULE_REPO" geoip2-module &>"$LOG_DIR/git-geoip2.log" || { log_error "Failed to clone GeoIP2 module"; exit 1; }
+
+    log_info "Cloning headers-more module"
+    git clone --depth 1 "$HEADERS_MORE_REPO" headers-more-module &>"$LOG_DIR/git-headers-more.log" || { log_error "Failed to clone headers-more module"; exit 1; }
+
+    log_info "Cloning zstd module"
+    git clone --depth 1 "$ZSTD_MODULE_REPO" zstd-module &>"$LOG_DIR/git-zstd.log" || { log_error "Failed to clone zstd module"; exit 1; }
+
     log_success "Source files downloaded and extracted"
 }
 
@@ -304,6 +341,9 @@ build_nginx() {
         --with-http_sub_module \
         --with-http_v2_module \
         --with-http_v3_module \
+    --add-dynamic-module="$BUILD_DIR/geoip2-module" \
+    --add-dynamic-module="$BUILD_DIR/headers-more-module" \
+    --add-dynamic-module="$BUILD_DIR/zstd-module" \
         --with-ld-opt="$LDFLAGS" &>"$LOG_DIR/nginx-configure.log"
     
     if [ $? -ne 0 ]; then
@@ -347,6 +387,32 @@ install_nginx() {
         log_error "NGINX installation failed. Check $LOG_DIR/nginx-install.log"
         exit 1
     fi
+
+    # Create modules directory and install dynamic modules
+    mkdir -p /etc/nginx/modules
+
+    log_info "Installing dynamic modules"
+    if [ -d "$BUILD_DIR/nginx-${NGINX_VERSION}/objs" ]; then
+        # Try copying directly from objs
+        cp "$BUILD_DIR/nginx-${NGINX_VERSION}/objs"/*.so /etc/nginx/modules/ 2>/dev/null || {
+            log_warn "No dynamic modules found in objs directory"
+            # Fallback: search the entire build tree for built modules
+            find "$BUILD_DIR" -type f -name "*.so" -exec cp {} /etc/nginx/modules/ \; 2>/dev/null || true
+        }
+
+        # Set correct permissions (best-effort)
+        chown root:root /etc/nginx/modules/*.so 2>/dev/null || true
+        chmod 0644 /etc/nginx/modules/*.so 2>/dev/null || true
+
+        # Report result
+        if ls /etc/nginx/modules/*.so >/dev/null 2>&1; then
+            log_success "Dynamic modules installed to /etc/nginx/modules/"
+        else
+            log_warn "No dynamic module .so files were installed"
+        fi
+    else
+        log_error "NGINX objs directory not found - modules may not be available"
+    fi
     
     # Set permissions
     chown -R nginx:nginx /var/cache/nginx /var/log/nginx
@@ -371,6 +437,12 @@ user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
 pid /run/nginx.pid;
+
+# Load dynamic modules (installed to /etc/nginx/modules)
+load_module /etc/nginx/modules/ngx_http_geoip2_module.so;
+load_module /etc/nginx/modules/ngx_http_headers_more_filter_module.so;
+load_module /etc/nginx/modules/ngx_http_zstd_filter_module.so;
+load_module /etc/nginx/modules/ngx_http_zstd_static_module.so;
 
 events {
     worker_connections 1024;
@@ -411,6 +483,11 @@ http {
     gzip_comp_level 6;
     gzip_types text/plain text/css text/xml application/json application/javascript 
                application/xml+rss application/atom+xml image/svg+xml;
+
+    # Zstandard compression (requires dynamic module)
+    zstd on;
+    zstd_comp_level 7;
+    zstd_types text/plain text/css text/xml application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
     
     # Include additional configurations
     include /etc/nginx/conf.d/*.conf;
@@ -665,9 +742,9 @@ show_summary() {
     echo -e "• Modern SSL/TLS configuration with TLS 1.2/1.3"
     echo -e "• HTTP/3 support with QUIC protocol enabled"
     echo -e "• Security headers configured (X-Frame-Options, X-Content-Type-Options)"
-    echo -e "• Gzip compression enabled for better performance"
-    echo -e "• Built with latest OpenSSL for enhanced security"
-    echo -e "• Strong SSL ciphers and protocols enforced"
+    echo -e "• Zstd, and as fallback Gzip compression enabled for better performance"
+    echo -e "• Built with latest OpenSSL libraries for enhanced security and performance"
+    echo -e "• Strong TLS ciphers and protocols enforced"
     echo
     echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(hostname -I | awk '{print $1}')${NC}"
     echo
@@ -833,6 +910,45 @@ verify() {
         log_success "HTTP/3 support: enabled"
     else
         log_warn "HTTP/3 support: not enabled"
+    fi
+
+    # Verify dynamic module files exist in /etc/nginx/modules
+    if [ -d "/etc/nginx/modules" ]; then
+        local missing=0
+        for mod in \
+            ngx_http_geoip2_module.so \
+            ngx_http_headers_more_filter_module.so \
+            ngx_http_zstd_filter_module.so \
+            ngx_http_zstd_static_module.so; do
+            if [ -f "/etc/nginx/modules/$mod" ]; then
+                log_success "Module present: $mod"
+            else
+                log_warn "Module missing: $mod"
+                missing=$((missing+1))
+            fi
+        done
+        if [ "$missing" -gt 0 ]; then
+            log_warn "$missing expected module(s) were not found in /etc/nginx/modules"
+        fi
+    else
+        log_warn "/etc/nginx/modules directory not found"
+    fi
+
+    # Check third-party dynamic modules
+    if nginx -V 2>&1 | grep -q "--add-dynamic-module=.*geoip2"; then
+        log_success "GeoIP2 module compiled"
+    else
+        log_warn "GeoIP2 module not found in build flags"
+    fi
+    if nginx -V 2>&1 | grep -q "--add-dynamic-module=.*headers-more"; then
+        log_success "headers-more module compiled"
+    else
+        log_warn "headers-more module not found in build flags"
+    fi
+    if nginx -V 2>&1 | grep -q "--add-dynamic-module=.*zstd"; then
+        log_success "Zstandard module compiled"
+    else
+        log_warn "Zstandard module not found in build flags"
     fi
     
     # Check directories and permissions
