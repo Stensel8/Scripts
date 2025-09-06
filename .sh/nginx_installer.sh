@@ -118,12 +118,12 @@ validate_env() {
 
 # nginx
 readonly NGINX_VERSION="1.29.1"
-NGINX_URL="https://github.com/nginx/nginx/archive/refs/tags/release-${NGINX_VERSION}.tar.gz"  # GitHub tag archive
-NGINX_SHA256="8b864d3d803d903b77f77bf45ef9dbc310c90719e350f2ae5a3515d1193481f6"  # for nginx (update when version changes)
+NGINX_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz,https://github.com/nginx/nginx/archive/refs/tags/release-${NGINX_VERSION}.tar.gz"
+NGINX_SHA256="c589f7e7ed801ddbd904afbf3de26ae24eb0cce27c7717a2e94df7fb12d6ad27"  # for nginx (update when version changes)
 
 # OpenSSL
 readonly OPENSSL_VERSION="3.5.2"
-OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+OPENSSL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz,https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 OPENSSL_SHA256="c53a47e5e441c930c3928cf7bf6fb00e5d129b630e0aa873b08258656e7345ec"  # for openssl-${OPENSSL_VERSION}.tar.gz
 
 # PCRE2
@@ -133,7 +133,7 @@ PCRE2_SHA256="0e138387df7835d7403b8351e2226c1377da804e0737db0e071b48f07c9d12ee" 
 
 # zlib (reference: https://github.com/madler/zlib/releases/tag/v${ZLIB_VERSION})
 readonly ZLIB_VERSION="1.3.1"
-ZLIB_URL="https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
+ZLIB_URL="https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz,https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
 ZLIB_SHA256="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"  # for zlib-${ZLIB_VERSION}.tar.gz
 
 # headers-more module
@@ -215,11 +215,16 @@ trap on_err ERR
 
 # Cleanup function
 cleanup() {
+    local exit_code=$?
     if [ -n "$BUILD_DIR" ] && [ -d "$BUILD_DIR" ]; then
         rm -rf "$BUILD_DIR"
     fi
     if [ -n "$LOG_DIR" ] && [ -d "$LOG_DIR" ]; then
-        rm -rf "$LOG_DIR"
+        if [ $exit_code -eq 0 ]; then
+            rm -rf "$LOG_DIR"
+        else
+            log_warn "Build failed. Logs preserved in: $LOG_DIR"
+        fi
     fi
 }
 trap cleanup EXIT INT TERM
@@ -273,7 +278,7 @@ confirm_or_exit() {
 require_cmds() {
     local missing=()
     # core tools; handle sha256 tooling separately below
-    local cmds=(wget gcc make tar perl awk sed grep)
+    local cmds=(curl make tar perl awk sed grep)
     for c in "${cmds[@]}"; do
         if ! command -v "$c" >/dev/null 2>&1; then
             missing+=("$c")
@@ -455,7 +460,7 @@ install_dependencies() {
         log_info "Detected Debian/Ubuntu system"
         export DEBIAN_FRONTEND=noninteractive
         run_or_fail apt-get update -qq &>"$LOG_DIR/apt-update.log"
-        local apt_pkgs=(build-essential libpcre2-dev zlib1g-dev perl wget gcc make hostname zstd libzstd-dev pkg-config)
+        local apt_pkgs=(build-essential libpcre2-dev zlib1g-dev perl curl gcc make hostname zstd libzstd-dev pkg-config)
         run_or_fail apt-get install -y "${apt_pkgs[@]}" &>"$LOG_DIR/apt-install.log"
     elif pkg_ok dnf; then
         log_info "Detected Fedora/RHEL system"
@@ -464,12 +469,12 @@ install_dependencies() {
         else
             run_or_fail dnf groupinstall -y "Development Tools" &>"$LOG_DIR/dnf-install.log"
         fi
-        local dnf_pkgs=(pcre2-devel zlib-devel perl wget gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config)
+        local dnf_pkgs=(pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config)
         run_or_fail dnf install -y "${dnf_pkgs[@]}" &>"$LOG_DIR/dnf-install.log"
     elif pkg_ok yum; then
         log_info "Detected CentOS/RHEL system"
         run_or_fail yum groupinstall -y "Development Tools" &>"$LOG_DIR/yum-install.log"
-        local yum_pkgs=(pcre2-devel zlib-devel perl wget gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config)
+        local yum_pkgs=(pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config)
         run_or_fail yum install -y "${yum_pkgs[@]}" &>"$LOG_DIR/yum-install.log"
     else
         log_error "Unsupported package manager. This script requires apt, dnf, or yum."
@@ -516,19 +521,35 @@ download_sources() {
     
     cd "$BUILD_DIR" || exit 1
 
-    # Helper: download with fallbacks
+    # Helper: download with fallbacks using curl
     download_with_fallbacks() {
+        local id="$1"; shift
         local outfile="$1"; shift
         local urls_csv="$1"; shift
+        local log_file="$LOG_DIR/download-${id}.log"
         local IFS=','
         local urls=($urls_csv)
+        
+        : > "$log_file" # Clear previous log
+        
         for u in "${urls[@]}"; do
             if [ -z "$u" ]; then continue; fi
-            if wget -q --tries=3 --timeout=30 -O "$outfile" "$u"; then
-                echo "$u"
+            
+            echo "Attempting to download from: $u" >> "$log_file"
+            # Use curl with options:
+            # -L: follow redirects
+            # -f: fail silently on server errors (HTTP 4xx/5xx)
+            # -sS: show errors, but not progress
+            # --connect-timeout: connection timeout
+            # -o: output file
+            if curl -LfsS --connect-timeout 15 -o "$outfile" "$u" >>"$log_file" 2>&1; then
+                echo "$u" # Return the successful URL
                 return 0
             fi
+            echo "Download failed from: $u" >> "$log_file"
         done
+        
+        log_error "All download attempts failed for ${id}. See log for details: ${log_file}"
         return 1
     }
 
@@ -540,7 +561,7 @@ download_sources() {
             continue
         fi
         log_info "Fetching ${id} from ${urls}"
-        if ! src_url=$(download_with_fallbacks "$archive" "$urls"); then
+        if ! src_url=$(download_with_fallbacks "$id" "$archive" "$urls"); then
             log_error "Failed to download ${id} from all sources"
             exit 1
         fi
@@ -777,13 +798,25 @@ install_nginx() {
         log_error "NGINX objs directory not found - modules may not be available"
     fi
     
-    # Set permissions
-    chown -R nginx:nginx /var/cache/nginx /var/log/nginx
-    chmod 755 /var/cache/nginx /var/log/nginx
+    # Set permissions for directories
+    # Configs: owned by root, manageable by nginx group
+    chown -R root:nginx /etc/nginx
+    chmod -R 775 /etc/nginx
+    find /etc/nginx -type f -exec chmod 664 {} +
+
+    # Logs: owned by nginx user/group for worker processes
+    chown -R nginx:nginx /var/log/nginx
+    chmod -R 775 /var/log/nginx
+    find /var/log/nginx -type f -exec chmod 664 {} +
+
+    # Cache: owned by nginx user/group for worker processes
+    chown -R nginx:nginx /var/cache/nginx
+    chmod -R 750 /var/cache/nginx
     
     # Create basic configuration and modular snippets
     create_basic_config
     create_snippets
+    create_http_hardening_snippet
     
     # Create mime.types file
     create_mime_types
@@ -818,6 +851,20 @@ install_nginx() {
     log_success "NGINX installation completed"
 }
 
+# Create http hardening snippet
+create_http_hardening_snippet() {
+    mkdir -p /etc/nginx/snippets
+    cat > /etc/nginx/snippets/http_hardening.snippet << 'EOF'
+# Block HTTP/1.0 and HTTP/1.1
+# Return 444 (Connection Closed Without Response) if not HTTP/2 or HTTP/3
+if ($server_protocol ~* "HTTP/1") {
+    return 444;
+}
+EOF
+    chmod 0644 /etc/nginx/snippets/http_hardening.snippet || true
+    log_success "Enabled HTTP hardening: /etc/nginx/snippets/http_hardening.snippet"
+}
+
 # Create basic NGINX configuration
 create_basic_config() {
     local stream_block=""
@@ -847,6 +894,9 @@ events {
 }
 
 http {
+    # Hide NGINX version on error pages
+    server_tokens off;
+
     include /etc/nginx/mime.types;
 
     # Pull in modular HTTP snippets (core, security, compression, TLS, etc.)
@@ -861,6 +911,8 @@ http {
         listen [::]:80 default_server;
         server_name _;
         root /usr/share/nginx/html;
+        
+        include /etc/nginx/snippets/http_hardening.snippet;
         
         location / {
             index index.html index.htm;
@@ -950,17 +1002,21 @@ EOF
 
     # Security headers
     cat > /etc/nginx/snippets/security.conf << 'EOF'
-# Basic security headers
+# Security headers
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header X-XSS-Protection "1; mode=block" always;
+
+# Completely remove the Server header
+# This requires the headers-more module, which is enabled by default
+more_clear_headers "Server";
 EOF
     chmod 0644 /etc/nginx/snippets/security.conf || true
 
     # TLS core
     cat > /etc/nginx/snippets/ssl_core.conf << 'EOF'
 # Core SSL/TLS settings
-ssl_protocols TLSv1.2 TLSv1.3;
+ssl_protocols TLSv1.3;
 ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256;
 ssl_prefer_server_ciphers on;
 ssl_session_cache shared:SSL:50m;
@@ -1089,9 +1145,12 @@ show_summary() {
         echo -e "${RED}✗${NC} NGINX installation may have failed"
     fi
 
-    echo
     echo -e "${BOLD}Service Management${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "Service management (start, stop, reload) requires ${BLUE}sudo${NC}."
+    echo -e "For easier config file editing, you can add your user to the ${BLUE}nginx${NC} group:"
+    echo -e "Example: ${BLUE}sudo adduser <your_user> nginx${NC}"
+    echo
     if has_systemd; then
         echo -e "Start NGINX:    ${BLUE}sudo systemctl start nginx${NC}"
         echo -e "Stop NGINX:     ${BLUE}sudo systemctl stop nginx${NC}"
@@ -1124,12 +1183,14 @@ show_summary() {
     echo
     echo -e "${BOLD}Security Notes${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "• Modern SSL/TLS configuration with TLS 1.2/1.3"
+    echo -e "• Modern SSL/TLS configuration with TLS 1.3 only"
     echo -e "• HTTP/3 support with QUIC protocol enabled"
     echo -e "• Security headers configured (X-Frame-Options, X-Content-Type-Options)"
     echo -e "• Zstd, and as fallback Gzip compression enabled for better performance"
     echo -e "• Built with latest OpenSSL libraries for enhanced security and performance"
     echo -e "• Strong TLS ciphers and protocols enforced"
+    echo -e "• Server version completely hidden"
+    echo -e "• HTTP/1.0 and HTTP/1.1 blocked (HTTP/2+ only)"
     echo
     echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(primary_ip)${NC}"
     echo
@@ -1151,11 +1212,11 @@ cmd_install() {
     confirm_or_exit "Proceed with NGINX installation? This will compile and install NGINX with OpenSSL." "CONFIRM"
     
     check_root
-    require_cmds
     print_header
     
     backup_existing
     install_dependencies
+    require_cmds
     download_sources
     build_openssl
     build_nginx
