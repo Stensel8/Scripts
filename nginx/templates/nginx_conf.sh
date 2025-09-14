@@ -37,12 +37,16 @@ http {
     # Site-specific vhosts belong in conf.d (kept empty by this installer)
     include /etc/nginx/conf.d/*.conf;
     
-    # Default server
+    # Default server - HTTPS only
     server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        server_name _;
+        listen 443 ssl http2 default_server;
+        listen [::]:443 ssl http2 default_server;
+        server_name localhost;
         root /usr/share/nginx/html;
+        
+        # SSL certificate configuration
+        ssl_certificate /etc/nginx/ssl/localhost.crt;
+        ssl_certificate_key /etc/nginx/ssl/localhost.key;
         
         include /etc/nginx/snippets/http_hardening.snippet;
         

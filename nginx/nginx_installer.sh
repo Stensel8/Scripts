@@ -904,26 +904,7 @@ http {
 
     # Site-specific vhosts belong in conf.d (kept empty by this installer)
     include /etc/nginx/conf.d/*.conf;
-    
-    # Default server
-    server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        server_name _;
-        root /usr/share/nginx/html;
-        
-        include /etc/nginx/snippets/http_hardening.snippet;
-        
-        location / {
-            index index.html index.htm;
-        }
-        
-        error_page 404 /404.html;
-        error_page 500 502 503 504 /50x.html;
-        location = /50x.html {
-            root /usr/share/nginx/html;
-        }
-    }
+        # No default port 80 server; HTTPS sites live in conf.d
 }
 
 ${stream_block}
@@ -943,6 +924,116 @@ EOF
     cat > /usr/share/nginx/html/50x.html << 'EOF'
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Server error</title><style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;background:#f7f9fb}main{background:#fff;border:1px solid #e5ece8;border-radius:10px;padding:24px 28px;box-shadow:0 2px 4px rgba(0,0,0,.04);text-align:center}</style><main><h1 style="margin:0 0 8px;color:#b08900">Something went wrong</h1><p>A temporary error occurred while processing your request.</p><p>Please try again later.</p></main></html>
 EOF
+}
+
+# Ensure a self-signed certificate exists for localhost
+ensure_self_signed_cert() {
+    local ssl_dir="/etc/nginx/ssl"
+    local crt="$ssl_dir/localhost.crt"
+    local key="$ssl_dir/localhost.key"
+    mkdir -p "$ssl_dir"
+
+    if [[ -f "$crt" && -f "$key" ]]; then
+        log_info "Self-signed cert already exists: $crt"
+        return 0
+    fi
+
+    log_step "Generating self-signed TLS certificate (ECDSA P-256) for localhost"
+    # Use ECDSA (prime256v1) for modern, non-RSA cert; include SANs; valid ~397 days
+    openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+        -keyout "$key" -out "$crt" -days 397 -sha256 \
+        -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1" &>"$LOG_DIR/openssl-selfsigned.log" || {
+        log_error "Failed to generate self-signed certificate"; show_log_tail "$LOG_DIR/openssl-selfsigned.log" 60; return 1; }
+    chmod 0600 "$key" || true
+    chmod 0644 "$crt" || true
+    log_success "Created self-signed cert: $crt"
+}
+
+# Create HTTPS server and redirect HTTP->HTTPS, then reload nginx
+configure_https_only() {
+    log_step "Configuring HTTPS-only with self-signed certificate"
+
+    ensure_self_signed_cert || return 1
+
+    # Create HTTPS server config
+    local https_conf="/etc/nginx/conf.d/https-localhost.conf"
+    cat > "$https_conf" << 'EOF'
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    # HTTP/3 (QUIC) if supported by build
+    listen 443 quic reuseport;
+    listen [::]:443 quic reuseport;
+
+    server_name _;
+    root /usr/share/nginx/html;
+
+    ssl_certificate     /etc/nginx/ssl/localhost.crt;
+    ssl_certificate_key /etc/nginx/ssl/localhost.key;
+
+    include /etc/nginx/snippets/ssl_core.conf;
+    include /etc/nginx/snippets/compression.conf;
+    include /etc/nginx/snippets/security.conf;
+    # Optional compression module (present when zstd module is compiled)
+    include /etc/nginx/snippets/zstd.conf;
+    # Enforce modern protocols; block HTTP/1.x
+    include /etc/nginx/snippets/http_hardening.snippet;
+
+    add_header Alt-Svc 'h3=":443"; ma=86400' always;
+
+    location / {
+        index index.html index.htm;
+    }
+
+    error_page 404 /404.html;
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html { root /usr/share/nginx/html; }
+}
+EOF
+    chmod 0644 "$https_conf" || true
+
+    # Remove any HTTP:80 listeners from the main nginx.conf default server (disable port 80)
+    local nginx_conf="/etc/nginx/nginx.conf"
+    if [[ -f "$nginx_conf" ]]; then
+        awk '
+            BEGIN { lvl=0; keep=1; }
+            {
+                # Track brace nesting level
+                for(i=1;i<=NF;i++){
+                    if($i=="{") lvl++
+                    else if($i=="}") lvl--
+                }
+            }
+            /server[ \t]*\{/ && lvl==0 {
+                # Start of a server block at top-level within http{}
+                in_srv=1; keep_buf=1; buf=""; srv_lvl=lvl+1; nextline=$0;
+            }
+            {
+                if(in_srv){
+                    buf = buf $0 "\n";
+                    if($0 ~ /listen[ \t]+([^;]*:)?80([ \t;]|$)/) keep_buf=0;
+                    # Close of server block
+                    if(index($0, "}")>0 && lvl < srv_lvl){
+                        if(keep_buf) printf "%s", buf; # keep servers that do NOT listen on 80
+                        in_srv=0; buf="";
+                    }
+                    next;
+                }
+                print $0;
+            }
+        ' "$nginx_conf" > "$nginx_conf.tmp" && mv "$nginx_conf.tmp" "$nginx_conf"
+        log_info "Removed server blocks listening on port 80 from nginx.conf (if any)"
+    fi
+
+    # Validate and reload
+    if nginx -t; then
+        has_systemd && systemctl reload nginx || /usr/sbin/nginx -s reload
+        log_success "HTTPS-only configuration applied and NGINX reloaded"
+    else
+        log_error "NGINX configuration test failed; see nginx -t output above"
+        return 1
+    fi
 }
 
 # Create optional, feature-gated configs (e.g., zstd) based on module availability
@@ -1015,10 +1106,14 @@ EOF
 
     # TLS core
     cat > /etc/nginx/snippets/ssl_core.conf << 'EOF'
-# Core SSL/TLS settings
+# Core SSL/TLS settings (modern)
+# TLS 1.3 only to avoid legacy/weak ciphers; TLSv1.3 cipher suites are chosen by OpenSSL
 ssl_protocols TLSv1.3;
-ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256;
-ssl_prefer_server_ciphers on;
+
+# Prefer modern curves for key exchange; X25519 first, fallback to secp384r1
+# Note: ssl_conf_command requires OpenSSL 1.1.1+
+ssl_conf_command Curves X25519:secp384r1;
+
 ssl_session_cache shared:SSL:50m;
 ssl_session_timeout 1d;
 EOF
@@ -1167,12 +1262,12 @@ show_summary() {
     echo
     echo -e "${BOLD}Connection Information${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "HTTP Port:      ${BLUE}80${NC}"
-    echo -e "HTTPS Port:     ${BLUE}443${NC}"
+    echo -e "HTTPS Port:     ${BLUE}443${NC} ${GREEN}(SSL/TLS only)${NC}"
     echo -e "Config file:    ${BLUE}/etc/nginx/nginx.conf${NC}"
     echo -e "Snippets:       ${BLUE}/etc/nginx/snippets/${NC}"
     echo -e "Site configs:   ${BLUE}/etc/nginx/conf.d/${NC}"
     echo -e "Document root:  ${BLUE}/usr/share/nginx/html${NC}"
+    echo -e "SSL certs:      ${BLUE}/etc/nginx/ssl/${NC}"
     echo -e "Log files:      ${BLUE}/var/log/nginx/${NC}"
     echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
     
@@ -1184,6 +1279,8 @@ show_summary() {
     echo -e "${BOLD}Security Notes${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "• Modern SSL/TLS configuration with TLS 1.3 only"
+    echo -e "• Self-signed certificate for localhost (testing)"
+    echo -e "• HTTP port 80 completely disabled (HTTPS only)"
     echo -e "• HTTP/3 support with QUIC protocol enabled"
     echo -e "• Security headers configured (X-Frame-Options, X-Content-Type-Options)"
     echo -e "• Zstd, and as fallback Gzip compression enabled for better performance"
@@ -1192,7 +1289,7 @@ show_summary() {
     echo -e "• Server version completely hidden"
     echo -e "• HTTP/1.0 and HTTP/1.1 blocked (HTTP/2+ only)"
     echo
-    echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(primary_ip)${NC}"
+    echo -e "${YELLOW}Connect with:${NC} ${BLUE}https://localhost${NC} ${GREEN}(self-signed certificate)${NC}"
     echo
 }
 
@@ -1221,6 +1318,8 @@ cmd_install() {
     build_openssl
     build_nginx
     install_nginx
+    # Configure HTTPS-only by default (self-signed cert for localhost) and reload
+    configure_https_only
     test_configuration
     
     # Enable and start NGINX service
@@ -1413,11 +1512,11 @@ cmd_verify() {
     
     # Check listening ports
     if command -v ss &>/dev/null; then
-        local http_ports=$(ss -tlnp | grep :80 | wc -l)
-        if [ "$http_ports" -gt 0 ]; then
-            log_success "NGINX is listening on port 80"
+        local https_ports=$(ss -tlnp | grep :443 | wc -l)
+        if [ "$https_ports" -gt 0 ]; then
+            log_success "NGINX is listening on port 443 (HTTPS)"
         else
-            log_warn "NGINX is not listening on port 80"
+            log_warn "NGINX is not listening on port 443 (HTTPS)"
         fi
     fi
     

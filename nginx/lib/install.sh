@@ -131,8 +131,42 @@ set_nginx_permissions() {
     chmod -R 750 /var/cache/nginx
 }
 
+# Generate self-signed SSL certificate for localhost
+generate_ssl_certificate() {
+    log_step "Generating self-signed SSL certificate for localhost"
+    
+    # Create SSL directory
+    mkdir -p /etc/nginx/ssl
+    chmod 700 /etc/nginx/ssl
+    
+    # Certificate paths
+    local cert_path="/etc/nginx/ssl/localhost.crt"
+    local key_path="/etc/nginx/ssl/localhost.key"
+    
+    # Generate private key and certificate in one command
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "$key_path" \
+        -out "$cert_path" \
+        -subj "/C=US/ST=Local/L=Local/O=Local/OU=Local/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+        &>/dev/null || {
+        log_error "Failed to generate SSL certificate"
+        exit 1
+    }
+    
+    # Set proper permissions
+    chmod 600 "$key_path"
+    chmod 644 "$cert_path"
+    chown root:root "$key_path" "$cert_path"
+    
+    log_success "Generated self-signed SSL certificate for localhost"
+}
+
 # Create nginx configuration
 create_nginx_config() {
+    # Generate SSL certificate first
+    generate_ssl_certificate
+    
     # Load configuration templates
     source "$SCRIPT_DIR/templates/nginx_conf.sh"
     source "$SCRIPT_DIR/templates/html_files.sh"
