@@ -969,6 +969,7 @@ server {
     # Enable HTTP/2
     http2 on;
 
+
     server_name _;
     root /usr/share/nginx/html;
 

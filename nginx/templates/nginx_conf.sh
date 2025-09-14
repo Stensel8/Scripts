@@ -44,7 +44,7 @@ http {
         
         # Enable HTTP/2
         http2 on;
-        
+
         server_name localhost;
         root /usr/share/nginx/html;
         
