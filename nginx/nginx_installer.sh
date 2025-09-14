@@ -960,11 +960,15 @@ configure_https_only() {
     local https_conf="/etc/nginx/conf.d/https-localhost.conf"
     cat > "$https_conf" << 'EOF'
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
     # HTTP/3 (QUIC) if supported by build
     listen 443 quic reuseport;
     listen [::]:443 quic reuseport;
+    
+    # Enable HTTP/2
+    http2 on;
+
 
     server_name _;
     root /usr/share/nginx/html;
