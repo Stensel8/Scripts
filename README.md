@@ -1,6 +1,8 @@
 # Scripts Repository
 
-Quick installer scripts for common tools. Run directly from GitHub without downloading.
+Quick installer scripts for my most used tools. Run directly from GitHub or download and modify as needed.
+
+Most scripts are changed to fit my own needs, but can always be easily modified for your own use.
 
 ## Bash
 
