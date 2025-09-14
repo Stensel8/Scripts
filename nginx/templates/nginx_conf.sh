@@ -39,8 +39,12 @@ http {
     
     # Default server - HTTPS only
     server {
-        listen 443 ssl http2 default_server;
-        listen [::]:443 ssl http2 default_server;
+        listen 443 ssl default_server;
+        listen [::]:443 ssl default_server;
+        
+        # Enable HTTP/2
+        http2 on;
+        
         server_name localhost;
         root /usr/share/nginx/html;
         
