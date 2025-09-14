@@ -211,12 +211,12 @@ verify_user() {
 
 verify_ports() {
     if command -v ss &>/dev/null; then
-        local http_ports=$(ss -tlnp | grep :80 | wc -l)
-        if [ "$http_ports" -gt 0 ]; then
-            log_success "NGINX is listening on port 80"
+        local https_ports=$(ss -tlnp | grep :443 | wc -l)
+        if [ "$https_ports" -gt 0 ]; then
+            log_success "NGINX is listening on port 443 (HTTPS)"
             return 0
         else
-            log_warn "NGINX is not listening on port 80"
+            log_warn "NGINX is not listening on port 443 (HTTPS)"
             return 1
         fi
     fi
@@ -275,6 +275,6 @@ show_summary() {
     echo -e "Log files:      ${BLUE}/var/log/nginx/${NC}"
     echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
     echo
-    echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(primary_ip)${NC}"
+    echo -e "${YELLOW}Connect with:${NC} ${BLUE}https://localhost${NC} ${GREEN}(self-signed certificate)${NC}"
     echo
 }

@@ -1167,12 +1167,12 @@ show_summary() {
     echo
     echo -e "${BOLD}Connection Information${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "HTTP Port:      ${BLUE}80${NC}"
-    echo -e "HTTPS Port:     ${BLUE}443${NC}"
+    echo -e "HTTPS Port:     ${BLUE}443${NC} ${GREEN}(SSL/TLS only)${NC}"
     echo -e "Config file:    ${BLUE}/etc/nginx/nginx.conf${NC}"
     echo -e "Snippets:       ${BLUE}/etc/nginx/snippets/${NC}"
     echo -e "Site configs:   ${BLUE}/etc/nginx/conf.d/${NC}"
     echo -e "Document root:  ${BLUE}/usr/share/nginx/html${NC}"
+    echo -e "SSL certs:      ${BLUE}/etc/nginx/ssl/${NC}"
     echo -e "Log files:      ${BLUE}/var/log/nginx/${NC}"
     echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
     
@@ -1184,6 +1184,8 @@ show_summary() {
     echo -e "${BOLD}Security Notes${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "• Modern SSL/TLS configuration with TLS 1.3 only"
+    echo -e "• Self-signed certificate for localhost (testing)"
+    echo -e "• HTTP port 80 completely disabled (HTTPS only)"
     echo -e "• HTTP/3 support with QUIC protocol enabled"
     echo -e "• Security headers configured (X-Frame-Options, X-Content-Type-Options)"
     echo -e "• Zstd, and as fallback Gzip compression enabled for better performance"
@@ -1192,7 +1194,7 @@ show_summary() {
     echo -e "• Server version completely hidden"
     echo -e "• HTTP/1.0 and HTTP/1.1 blocked (HTTP/2+ only)"
     echo
-    echo -e "${YELLOW}Connect with:${NC} ${BLUE}http://$(primary_ip)${NC}"
+    echo -e "${YELLOW}Connect with:${NC} ${BLUE}https://localhost${NC} ${GREEN}(self-signed certificate)${NC}"
     echo
 }
 
@@ -1413,11 +1415,11 @@ cmd_verify() {
     
     # Check listening ports
     if command -v ss &>/dev/null; then
-        local http_ports=$(ss -tlnp | grep :80 | wc -l)
-        if [ "$http_ports" -gt 0 ]; then
-            log_success "NGINX is listening on port 80"
+        local https_ports=$(ss -tlnp | grep :443 | wc -l)
+        if [ "$https_ports" -gt 0 ]; then
+            log_success "NGINX is listening on port 443 (HTTPS)"
         else
-            log_warn "NGINX is not listening on port 80"
+            log_warn "NGINX is not listening on port 443 (HTTPS)"
         fi
     fi
     
