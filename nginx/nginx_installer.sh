@@ -127,9 +127,9 @@ OPENSSL_URL="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz,ht
 OPENSSL_SHA256="c53a47e5e441c930c3928cf7bf6fb00e5d129b630e0aa873b08258656e7345ec"  # for openssl-${OPENSSL_VERSION}.tar.gz
 
 # PCRE2
-readonly PCRE2_VERSION="10.45"
+readonly PCRE2_VERSION="10.46"
 PCRE2_URL="https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
-PCRE2_SHA256="0e138387df7835d7403b8351e2226c1377da804e0737db0e071b48f07c9d12ee"  # for pcre2-${PCRE2_VERSION}.tar.gz
+PCRE2_SHA256="8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07"  # for pcre2-${PCRE2_VERSION}.tar.gz
 
 # zlib (reference: https://github.com/madler/zlib/releases/tag/v${ZLIB_VERSION})
 readonly ZLIB_VERSION="1.3.1"
@@ -1032,8 +1032,24 @@ EOF
 
     # Validate and reload
     if nginx -t; then
-        has_systemd && systemctl reload nginx || /usr/sbin/nginx -s reload
-        log_success "HTTPS-only configuration applied and NGINX reloaded"
+        # Check if nginx is running before attempting reload
+        if has_systemd && systemctl is-active --quiet nginx; then
+            systemctl reload nginx
+            log_success "HTTPS-only configuration applied and NGINX reloaded"
+        elif has_systemd; then
+            # Start nginx if it's not running
+            systemctl start nginx
+            log_success "HTTPS-only configuration applied and NGINX started"
+        else
+            # For non-systemd systems, check if master process exists
+            if pgrep -f "nginx: master process" >/dev/null; then
+                /usr/sbin/nginx -s reload
+                log_success "HTTPS-only configuration applied and NGINX reloaded"
+            else
+                /usr/sbin/nginx
+                log_success "HTTPS-only configuration applied and NGINX started"
+            fi
+        fi
     else
         log_error "NGINX configuration test failed; see nginx -t output above"
         return 1
