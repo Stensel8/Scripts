@@ -7,7 +7,7 @@ Most scripts are changed to fit my own needs, but can always be easily modified 
 ## How to use
 git clone https://github.com/Stensel8/scripts.git
 
-cd scripts
+cd <folder>
 
 ./<script_name>_installer.sh
 
