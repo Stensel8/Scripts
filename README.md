@@ -11,6 +11,6 @@ cd scripts
 
 ./<script_name>_installer.sh
 
-./<script_name>_installer.ps1
+pwsh ./<script_name>_installer.ps1
 
 View this article for more info: [Installing PowerShell on Linux](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux?view=powershell-7.5)
