@@ -526,23 +526,35 @@ install_build_dependency() {
     export DEBIAN_FRONTEND=noninteractive
 
     if command -v apt-get &>/dev/null; then
-        invoke_command_with_shell "apt-get update -qq" "" "${log_prefix}-install.log"
+        local log_update
+        log_update=$(invoke_command_with_shell "apt-get update -qq" "" "${log_prefix}-install.log")
+        echo "${log_update}"
         local packages="build-essential libpcre2-dev zlib1g-dev perl curl gcc make hostname zstd libzstd-dev pkg-config"
-        invoke_command_with_shell "apt-get install -y ${packages}" "" "${log_prefix}-packages.log"
+        local log_packages
+        log_packages=$(invoke_command_with_shell "apt-get install -y ${packages}" "" "${log_prefix}-packages.log")
+        echo "${log_packages}"
     elif command -v dnf &>/dev/null; then
         local dnf_version
         dnf_version=$(dnf --version 2>/dev/null)
+        local log_install
         if [[ "${dnf_version}" =~ dnf5 ]]; then
-            invoke_command_with_shell "dnf install -y @development-tools" "" "${log_prefix}-install.log"
+            log_install=$(invoke_command_with_shell "dnf install -y @development-tools" "" "${log_prefix}-install.log")
         else
-            invoke_command_with_shell "dnf groupinstall -y \"Development Tools\"" "" "${log_prefix}-install.log"
+            log_install=$(invoke_command_with_shell "dnf groupinstall -y \"Development Tools\"" "" "${log_prefix}-install.log")
         fi
+        echo "${log_install}"
         local packages="pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config"
-        invoke_command_with_shell "dnf install -y ${packages}" "" "${log_prefix}-packages.log"
+        local log_packages
+        log_packages=$(invoke_command_with_shell "dnf install -y ${packages}" "" "${log_prefix}-packages.log")
+        echo "${log_packages}"
     elif command -v yum &>/dev/null; then
-        invoke_command_with_shell "yum groupinstall -y \"Development Tools\"" "" "${log_prefix}-install.log"
+        local log_install
+        log_install=$(invoke_command_with_shell "yum groupinstall -y \"Development Tools\"" "" "${log_prefix}-install.log")
+        echo "${log_install}"
         local packages="pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config"
-        invoke_command_with_shell "yum install -y ${packages}" "" "${log_prefix}-packages.log"
+        local log_packages
+        log_packages=$(invoke_command_with_shell "yum install -y ${packages}" "" "${log_prefix}-packages.log")
+        echo "${log_packages}"
     else
         echo "Unsupported package manager. Install dependencies manually (apt, dnf, or yum required)." >&2
         exit 1
@@ -652,14 +664,19 @@ build_openssl() {
         *) target="linux-generic64" ;;
     esac
 
-    invoke_logged_process "openssl-configure.log" \
+    local log_configure log_make log_install
+    log_configure=$(invoke_logged_process "openssl-configure.log" \
         ./Configure "${target}" \
         "--prefix=${install_dir}" \
         "--openssldir=${install_dir}/ssl" \
-        "enable-tls1_3" "no-shared" "no-tests" "-fPIC" "-O3"
+        "enable-tls1_3" "no-shared" "no-tests" "-fPIC" "-O3")
+    echo "${log_configure}"
 
-    invoke_logged_process "openssl-make.log" make -j"$(get_processor_count)"
-    invoke_logged_process "openssl-install.log" make install_sw
+    log_make=$(invoke_logged_process "openssl-make.log" make -j"$(get_processor_count)")
+    echo "${log_make}"
+
+    log_install=$(invoke_logged_process "openssl-install.log" make install_sw)
+    echo "${log_install}"
 
     mkdir -p "${install_dir}/ssl"
     cp apps/openssl.cnf "${install_dir}/ssl/openssl.cnf"
@@ -745,8 +762,13 @@ build_nginx() {
     fi
 
     # Try dynamic build first
-    if ${configure_script} "${dynamic_args[@]}" >"$(get_log_file_path "nginx-configure.log")" 2>&1; then
-        if make -j"$(get_processor_count)" >"$(get_log_file_path "nginx-build.log")" 2>&1; then
+    local log_configure log_build
+    log_configure=$(get_log_file_path "nginx-configure.log")
+    log_build=$(get_log_file_path "nginx-build.log")
+    if ${configure_script} "${dynamic_args[@]}" >"${log_configure}" 2>&1; then
+        echo "${log_configure}"
+        if make -j"$(get_processor_count)" >"${log_build}" 2>&1; then
+            echo "${log_build}"
             ZSTD_BUILD_MODE="dynamic"
             popd >/dev/null
             write_success "NGINX built successfully"
@@ -1145,11 +1167,9 @@ invoke_install() {
 
     set_config_template "${enable_stream}" "${enable_zstd}"
 
-    if [[ ${enable_zstd} -eq 1 ]]; then
+    if [[ ${enable_zstd} -eq 1 && "${ZSTD_BUILD_MODE}" == "dynamic" ]]; then
         write_module_loader "modules/ngx_http_zstd_filter_module.so" "zstd_filter.conf"
-        if [[ "${ZSTD_BUILD_MODE}" == "dynamic" ]]; then
-            write_module_loader "modules/ngx_http_zstd_static_module.so" "zstd_static.conf"
-        fi
+        write_module_loader "modules/ngx_http_zstd_static_module.so" "zstd_static.conf"
     else
         remove_module_loader "zstd_filter.conf"
         remove_module_loader "zstd_static.conf"

@@ -50,7 +50,7 @@ function Import-EnvFile {
                     while ($value -match '\$\{([^}]+)\}') {
                         $varName = $Matches[1]
                         $varValue = if ($envVars.ContainsKey($varName)) { $envVars[$varName] } else { '' }
-                        $value = $value -replace "\$\{$varName\}", $varValue
+                        $value = $value -replace "\$\{$([regex]::Escape($varName))\}", $varValue
                     }
                     $envVars[$key] = $value
                 }
@@ -684,24 +684,30 @@ function Install-BuildDependency {
     $logPrefix = 'deps'
     $env:DEBIAN_FRONTEND = 'noninteractive'
     if (Get-Command apt-get -ErrorAction SilentlyContinue) {
-        Invoke-CommandWithShell -Command 'apt-get update -qq' -LogName "$logPrefix-update.log"
+        $logPath = Invoke-CommandWithShell -Command 'apt-get update -qq' -LogName "$logPrefix-install.log"
+        Write-Information -MessageData $logPath -InformationAction Continue
         $packages = 'build-essential libpcre2-dev zlib1g-dev perl curl gcc make hostname zstd libzstd-dev pkg-config'
-        Invoke-CommandWithShell -Command "apt-get install -y $packages" -LogName "$logPrefix-install.log"
+        $logPath = Invoke-CommandWithShell -Command "apt-get install -y $packages" -LogName "$logPrefix-packages.log"
+        Write-Information -MessageData $logPath -InformationAction Continue
     }
     elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
         $dnfVersion = (& dnf --version 2>$null)
         if ($dnfVersion -match 'dnf5') {
-            Invoke-CommandWithShell -Command 'dnf install -y @development-tools' -LogName "$logPrefix-install.log"
+            $logPath = Invoke-CommandWithShell -Command 'dnf install -y @development-tools' -LogName "$logPrefix-install.log"
         } else {
-            Invoke-CommandWithShell -Command 'dnf groupinstall -y "Development Tools"' -LogName "$logPrefix-install.log"
+            $logPath = Invoke-CommandWithShell -Command 'dnf groupinstall -y "Development Tools"' -LogName "$logPrefix-install.log"
         }
+        Write-Information -MessageData $logPath -InformationAction Continue
         $packages = 'pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config'
-        Invoke-CommandWithShell -Command "dnf install -y $packages" -LogName "$logPrefix-packages.log"
+        $logPath = Invoke-CommandWithShell -Command "dnf install -y $packages" -LogName "$logPrefix-packages.log"
+        Write-Information -MessageData $logPath -InformationAction Continue
     }
     elseif (Get-Command yum -ErrorAction SilentlyContinue) {
-        Invoke-CommandWithShell -Command 'yum groupinstall -y "Development Tools"' -LogName "$logPrefix-install.log"
+        $logPath = Invoke-CommandWithShell -Command 'yum groupinstall -y "Development Tools"' -LogName "$logPrefix-install.log"
+        Write-Information -MessageData $logPath -InformationAction Continue
         $packages = 'pcre2-devel zlib-devel perl curl gcc make hostname zstd libzstd libzstd-devel pkgconfig pkgconf-pkg-config'
-        Invoke-CommandWithShell -Command "yum install -y $packages" -LogName "$logPrefix-packages.log"
+        $logPath = Invoke-CommandWithShell -Command "yum install -y $packages" -LogName "$logPrefix-packages.log"
+        Write-Information -MessageData $logPath -InformationAction Continue
     }
     else {
         throw 'Unsupported package manager. Install dependencies manually (apt, dnf, or yum required).'
@@ -795,15 +801,19 @@ function Build-OpenSSL {
             'armv6l' { 'linux-armv4' }
             default { 'linux-generic64' }
         }
-        Invoke-LoggedProcess -FilePath (Join-Path $sourceDir 'Configure') -Arguments @(
+        $logPath = Invoke-LoggedProcess -FilePath (Join-Path $sourceDir 'Configure') -Arguments @(
             $target,
             "--prefix=$installDir",
             "--openssldir=$installDir/ssl",
             'enable-tls1_3','no-shared','no-tests','-fPIC','-O3'
         ) -WorkingDirectory $sourceDir -LogName 'openssl-configure.log'
+        Write-Information -MessageData $logPath -InformationAction Continue
 
-        Invoke-LoggedProcess -FilePath 'make' -Arguments @("-j$(Get-ProcessorCount)") -WorkingDirectory $sourceDir -LogName 'openssl-make.log'
-        Invoke-LoggedProcess -FilePath 'make' -Arguments @('install_sw') -WorkingDirectory $sourceDir -LogName 'openssl-install.log'
+        $logPath = Invoke-LoggedProcess -FilePath 'make' -Arguments @("-j$(Get-ProcessorCount)") -WorkingDirectory $sourceDir -LogName 'openssl-make.log'
+        Write-Information -MessageData $logPath -InformationAction Continue
+
+        $logPath = Invoke-LoggedProcess -FilePath 'make' -Arguments @('install_sw') -WorkingDirectory $sourceDir -LogName 'openssl-install.log'
+        Write-Information -MessageData $logPath -InformationAction Continue
 
         if (-not (Test-Path (Join-Path $installDir 'ssl'))) {
             New-Item -ItemType Directory -Path (Join-Path $installDir 'ssl') -Force | Out-Null
@@ -895,11 +905,13 @@ function Build-Nginx {
         # Try dynamic build first
         try {
             if ($configureScript -eq '/bin/bash') {
-                Invoke-LoggedProcess -FilePath '/bin/bash' -Arguments $dynamicArgs -WorkingDirectory $sourceDir -LogName 'nginx-configure.log'
+                $logPath = Invoke-LoggedProcess -FilePath '/bin/bash' -Arguments $dynamicArgs -WorkingDirectory $sourceDir -LogName 'nginx-configure.log'
             } else {
-                Invoke-LoggedProcess -FilePath $configureScript -Arguments $dynamicArgs -WorkingDirectory $sourceDir -LogName 'nginx-configure.log'
+                $logPath = Invoke-LoggedProcess -FilePath $configureScript -Arguments $dynamicArgs -WorkingDirectory $sourceDir -LogName 'nginx-configure.log'
             }
-            Invoke-LoggedProcess -FilePath 'make' -Arguments @("-j$(Get-ProcessorCount)") -WorkingDirectory $sourceDir -LogName 'nginx-build.log'
+            Write-Information -MessageData $logPath -InformationAction Continue
+            $logPath = Invoke-LoggedProcess -FilePath 'make' -Arguments @("-j$(Get-ProcessorCount)") -WorkingDirectory $sourceDir -LogName 'nginx-build.log'
+            Write-Information -MessageData $logPath -InformationAction Continue
             $Script:ZstdBuildMode = 'dynamic'
         }
         catch {
@@ -984,7 +996,8 @@ function Install-Nginx {
 
     Push-Location (Join-Path $Script:BuildDir "nginx-$($Versions.Nginx)")
     try {
-        Invoke-LoggedProcess -FilePath 'make' -Arguments @('install') -WorkingDirectory (Get-Location).Path -LogName 'nginx-install.log'
+        $logPath = Invoke-LoggedProcess -FilePath 'make' -Arguments @('install') -WorkingDirectory (Get-Location).Path -LogName 'nginx-install.log'
+        Write-Information -MessageData $logPath -InformationAction Continue
     }
     finally {
         Pop-Location
@@ -1285,11 +1298,9 @@ function Invoke-Install {
     $enableStream = Get-EnvToggle -Name 'ENABLE_STREAM' -Default 'auto'
     $enableZstd   = Get-EnvToggle -Name 'ENABLE_ZSTD' -Default 'auto'
     Set-ConfigTemplate -EnableStream:$enableStream -EnableZstd:$enableZstd
-    if ($enableZstd) {
+    if ($enableZstd -and $Script:ZstdBuildMode -eq 'dynamic') {
         Write-ModuleLoader -ModulePath 'modules/ngx_http_zstd_filter_module.so' -LoaderName 'zstd_filter.conf'
-        if ($Script:ZstdBuildMode -eq 'dynamic') {
-            Write-ModuleLoader -ModulePath 'modules/ngx_http_zstd_static_module.so' -LoaderName 'zstd_static.conf'
-        }
+        Write-ModuleLoader -ModulePath 'modules/ngx_http_zstd_static_module.so' -LoaderName 'zstd_static.conf'
     } else {
         Remove-ModuleLoader -LoaderName 'zstd_filter.conf'
         Remove-ModuleLoader -LoaderName 'zstd_static.conf'

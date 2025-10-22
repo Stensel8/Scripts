@@ -21,7 +21,7 @@ sudo pwsh ./nginx_installer.ps1 remove
 Set environment variables in-line to change behaviour:
 
 ```bash
-ENABLE_HEADERS_MORE=0 sudo pwsh ./nginx_installer.ps1 install
+ENABLE_HEADERS_MORE=0 sudo ./nginx_installer.sh install
 ENABLE_ZSTD=0 sudo pwsh ./nginx_installer.ps1 install
 CONFIRM=no sudo pwsh ./nginx_installer.ps1 install
 ```
