@@ -3,12 +3,15 @@
 .SYNOPSIS
     Compile and install NGINX from source with OpenSSL using PowerShell 7.
 .DESCRIPTION
-    This script is a PowerShell rewrite of the former Bash-based installer. It maintains
-    feature parity while drawing templates from the files stored in the `config` folder
-    beside the script. No configuration values are embedded directly in the script; all
-    nginx configuration and default site files are sourced from those templates.
+    This script maintains feature parity with the Bash installer while drawing
+    templates from the files stored in the `config` folder beside the script. No
+    configuration values are embedded directly in the script; all nginx configuration
+    and default site files are sourced from those templates.
 #>
 
+# ============================================================================
+# PARAMETER PARSING
+# ============================================================================
 param(
     [Parameter()][ValidateSet('install','remove','verify','help')][string]$Command = 'install'
 )
@@ -16,7 +19,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# region: Globals & constants -------------------------------------------------
+# ============================================================================
+# GLOBALS & CONSTANTS
+# ============================================================================
 $Script:ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent (Convert-Path $MyInvocation.MyCommand.Path) }
 $Script:ConfigDir  = Join-Path $Script:ScriptRoot 'config'
 $Script:BuildDir   = Join-Path ([System.IO.Path]::GetTempPath()) ("nginx-build-" + [Guid]::NewGuid().ToString('N'))
@@ -30,29 +35,113 @@ $Script:ZstdBuildMode = 'dynamic'
 $null = New-Item -ItemType Directory -Path $Script:BuildDir -Force
 $null = New-Item -ItemType Directory -Path $Script:LogDir -Force
 
-# Version catalogue
+# Load configuration from .env file
+function Import-EnvFile {
+    param([string]$Path)
+    $envVars = @{}
+    if (Test-Path $Path) {
+        Get-Content $Path | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith('#')) {
+                if ($line -match '^([^=]+)=(.*)$') {
+                    $key = $Matches[1].Trim()
+                    $value = $Matches[2].Trim().Trim('"').Trim("'")
+                    # Simple variable expansion for ${VAR} syntax
+                    while ($value -match '\$\{([^}]+)\}') {
+                        $varName = $Matches[1]
+                        $varValue = if ($envVars.ContainsKey($varName)) { $envVars[$varName] } else { '' }
+                        $value = $value -replace "\$\{$varName\}", $varValue
+                    }
+                    $envVars[$key] = $value
+                }
+            }
+        }
+    }
+    return $envVars
+}
+
+$EnvFile = Join-Path $Script:ConfigDir '.env'
+$EnvConfig = Import-EnvFile -Path $EnvFile
+
+# Version catalogue (loaded from .env or fallback to defaults)
 $Versions = [ordered]@{
-    Nginx        = '1.29.1'
-    OpenSSL      = '3.5.3'
-    PCRE2        = '10.46'
-    Zlib         = '1.3.1'
-    HeadersMore  = '0.39'
-    ZstdModule   = '0.1.1'
+    Nginx        = if ($EnvConfig['NGINX_VERSION']) { $EnvConfig['NGINX_VERSION'] } else { '1.29.2' }
+    OpenSSL      = if ($EnvConfig['OPENSSL_VERSION']) { $EnvConfig['OPENSSL_VERSION'] } else { '3.6.0' }
+    PCRE2        = if ($EnvConfig['PCRE2_VERSION']) { $EnvConfig['PCRE2_VERSION'] } else { '10.47' }
+    Zlib         = if ($EnvConfig['ZLIB_VERSION']) { $EnvConfig['ZLIB_VERSION'] } else { '1.3.1' }
+    HeadersMore  = if ($EnvConfig['HEADERS_MORE_VERSION']) { $EnvConfig['HEADERS_MORE_VERSION'] } else { '0.39' }
+    ZstdModule   = if ($EnvConfig['ZSTD_MODULE_VERSION']) { $EnvConfig['ZSTD_MODULE_VERSION'] } else { '0.1.1' }
+}
+
+# Helper function to split URLs from .env
+function Get-UrlArray {
+    param([string]$UrlString)
+    if ([string]::IsNullOrWhiteSpace($UrlString)) { return @() }
+    return $UrlString -split ',' | ForEach-Object { $_.Trim() }
 }
 
 $Artifacts = @(
-    [pscustomobject]@{ Id = 'nginx';        Archive = "nginx-$($Versions.Nginx).tar.gz";      Sha256 = 'c589f7e7ed801ddbd904afbf3de26ae24eb0cce27c7717a2e94df7fb12d6ad27'; Strip = 1; Target = "nginx-$($Versions.Nginx)";        Toggle = $null; Urls = @("https://nginx.org/download/nginx-$($Versions.Nginx).tar.gz","https://github.com/nginx/nginx/archive/refs/tags/release-$($Versions.Nginx).tar.gz") }
-    [pscustomobject]@{ Id = 'openssl';      Archive = "openssl-$($Versions.OpenSSL).tar.gz";  Sha256 = 'c9489d2abcf943cdc8329a57092331c598a402938054dc3a22218aea8a8ec3bf'; Strip = 0; Target = "openssl-$($Versions.OpenSSL)";      Toggle = $null; Urls = @("https://www.openssl.org/source/openssl-$($Versions.OpenSSL).tar.gz","https://github.com/openssl/openssl/releases/download/openssl-$($Versions.OpenSSL)/openssl-$($Versions.OpenSSL).tar.gz") }
-    [pscustomobject]@{ Id = 'pcre2';        Archive = "pcre2-$($Versions.PCRE2).tar.gz";      Sha256 = '8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07'; Strip = 0; Target = "pcre2-$($Versions.PCRE2)";        Toggle = $null; Urls = @("https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$($Versions.PCRE2)/pcre2-$($Versions.PCRE2).tar.gz") }
-    [pscustomobject]@{ Id = 'zlib';         Archive = "zlib-$($Versions.Zlib).tar.gz";        Sha256 = '9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23'; Strip = 0; Target = "zlib-$($Versions.Zlib)";          Toggle = $null; Urls = @("https://zlib.net/zlib-$($Versions.Zlib).tar.gz","https://github.com/madler/zlib/releases/download/v$($Versions.Zlib)/zlib-$($Versions.Zlib).tar.gz") }
-    [pscustomobject]@{ Id = 'headers-more'; Archive = 'headers-more.tar.gz';                  Sha256 = 'dde68d3fa2a9fc7f52e436d2edc53c6d703dcd911283965d889102d3a877c778'; Strip = 1; Target = 'headers-more-module';              Toggle = 'ENABLE_HEADERS_MORE'; Urls = @("https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v$($Versions.HeadersMore).tar.gz") }
-    [pscustomobject]@{ Id = 'zstd';         Archive = 'zstd-module.tar.gz';                  Sha256 = '707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41'; Strip = 1; Target = 'zstd-module';                     Toggle = 'ENABLE_ZSTD'; Urls = @("https://github.com/tokers/zstd-nginx-module/archive/refs/tags/$($Versions.ZstdModule).tar.gz") }
+    [pscustomobject]@{
+        Id = 'nginx'
+        Archive = "nginx-$($Versions.Nginx).tar.gz"
+        Sha256 = if ($EnvConfig['NGINX_SHA256']) { $EnvConfig['NGINX_SHA256'] } else { '5669e3c29d49bf7f6eb577275b86efe4504cf81af885c58a1ed7d2e7b8492437' }
+        Strip = 1
+        Target = "nginx-$($Versions.Nginx)"
+        Toggle = $null
+        Urls = if ($EnvConfig['NGINX_URL']) { Get-UrlArray $EnvConfig['NGINX_URL'] } else { @("https://nginx.org/download/nginx-$($Versions.Nginx).tar.gz","https://github.com/nginx/nginx/archive/refs/tags/release-$($Versions.Nginx).tar.gz") }
+    }
+    [pscustomobject]@{
+        Id = 'openssl'
+        Archive = "openssl-$($Versions.OpenSSL).tar.gz"
+        Sha256 = if ($EnvConfig['OPENSSL_SHA256']) { $EnvConfig['OPENSSL_SHA256'] } else { 'b6a5f44b7eb69e3fa35dbf15524405b44837a481d43d81daddde3ff21fcbb8e9' }
+        Strip = 0
+        Target = "openssl-$($Versions.OpenSSL)"
+        Toggle = $null
+        Urls = if ($EnvConfig['OPENSSL_URL']) { Get-UrlArray $EnvConfig['OPENSSL_URL'] } else { @("https://www.openssl.org/source/openssl-$($Versions.OpenSSL).tar.gz","https://github.com/openssl/openssl/releases/download/openssl-$($Versions.OpenSSL)/openssl-$($Versions.OpenSSL).tar.gz") }
+    }
+    [pscustomobject]@{
+        Id = 'pcre2'
+        Archive = "pcre2-$($Versions.PCRE2).tar.gz"
+        Sha256 = if ($EnvConfig['PCRE2_SHA256']) { $EnvConfig['PCRE2_SHA256'] } else { 'c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16' }
+        Strip = 0
+        Target = "pcre2-$($Versions.PCRE2)"
+        Toggle = $null
+        Urls = if ($EnvConfig['PCRE2_URL']) { Get-UrlArray $EnvConfig['PCRE2_URL'] } else { @("https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$($Versions.PCRE2)/pcre2-$($Versions.PCRE2).tar.gz") }
+    }
+    [pscustomobject]@{
+        Id = 'zlib'
+        Archive = "zlib-$($Versions.Zlib).tar.gz"
+        Sha256 = if ($EnvConfig['ZLIB_SHA256']) { $EnvConfig['ZLIB_SHA256'] } else { '9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23' }
+        Strip = 0
+        Target = "zlib-$($Versions.Zlib)"
+        Toggle = $null
+        Urls = if ($EnvConfig['ZLIB_URL']) { Get-UrlArray $EnvConfig['ZLIB_URL'] } else { @("https://zlib.net/zlib-$($Versions.Zlib).tar.gz","https://github.com/madler/zlib/releases/download/v$($Versions.Zlib)/zlib-$($Versions.Zlib).tar.gz") }
+    }
+    [pscustomobject]@{
+        Id = 'headers-more'
+        Archive = 'headers-more.tar.gz'
+        Sha256 = if ($EnvConfig['HEADERS_MORE_SHA256']) { $EnvConfig['HEADERS_MORE_SHA256'] } else { 'dde68d3fa2a9fc7f52e436d2edc53c6d703dcd911283965d889102d3a877c778' }
+        Strip = 1
+        Target = 'headers-more-module'
+        Toggle = 'ENABLE_HEADERS_MORE'
+        Urls = if ($EnvConfig['HEADERS_MORE_URL']) { Get-UrlArray $EnvConfig['HEADERS_MORE_URL'] } else { @("https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v$($Versions.HeadersMore).tar.gz") }
+    }
+    [pscustomobject]@{
+        Id = 'zstd'
+        Archive = 'zstd-module.tar.gz'
+        Sha256 = if ($EnvConfig['ZSTD_MODULE_SHA256']) { $EnvConfig['ZSTD_MODULE_SHA256'] } else { '707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41' }
+        Strip = 1
+        Target = 'zstd-module'
+        Toggle = 'ENABLE_ZSTD'
+        Urls = if ($EnvConfig['ZSTD_MODULE_URL']) { Get-UrlArray $EnvConfig['ZSTD_MODULE_URL'] } else { @("https://github.com/tokers/zstd-nginx-module/archive/refs/tags/$($Versions.ZstdModule).tar.gz") }
+    }
 )
 
-# endregion -------------------------------------------------------------------
-
-# region: Logging helpers -----------------------------------------------------
+# ============================================================================
+# LOGGING HELPERS
+# ============================================================================
 $HostSupportsColor = $Host.UI.SupportsVirtualTerminal
+
 function Write-InstallerLog {
     param(
         [Parameter(Mandatory)][ValidateSet('Info','Success','Error','Warn','Step')][string]$Level,
@@ -75,6 +164,7 @@ function Write-ErrorLog{ param([string]$Message) Write-InstallerLog -Level Error
 function Write-Step    { param([string]$Message) Write-InstallerLog -Level Step    -Message $Message }
 function Write-Success { param([string]$Message) Write-InstallerLog -Level Success -Message $Message }
 
+# Error handler
 Register-EngineEvent PowerShell.OnScriptTerminating -Action {
     param($eventSender, $psEventArgs)
     [void]$eventSender
@@ -84,9 +174,9 @@ Register-EngineEvent PowerShell.OnScriptTerminating -Action {
     }
 } | Out-Null
 
-# endregion -------------------------------------------------------------------
-
-# region: Utility helpers -----------------------------------------------------
+# ============================================================================
+# UTILITY HELPERS
+# ============================================================================
 function Test-IsRoot {
     if ($IsLinux -or $IsMacOS) {
         try {
@@ -284,91 +374,269 @@ function Invoke-CommandWithShell {
     return $logPath
 }
 
-function Get-TemplatesFromFile {
-    param(
-        [Parameter(Mandatory)][string]$Path
-    )
-    if (-not (Test-Path $Path)) { return @() }
-    $lines = Get-Content -Path $Path
-    $templates = @()
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line -match "cat\s*>\s*(?<target>\S+)\s*<<\s*'?(?<marker>[A-Za-z0-9_]+)'?") {
-            $target = $Matches['target']
-            $marker = $Matches['marker']
-            $i++
-            $block = @()
-            while ($i -lt $lines.Count -and $lines[$i].Trim() -ne $marker) {
-                $block += $lines[$i]
-                $i++
-            }
-            $content = ($block -join "`n") + "`n"
-            $templates += [pscustomobject]@{
-                Source = $Path
-                Target = $target
-                Content = $content
-            }
-        }
-    }
-    return $templates
-}
-
-function Get-ConfigTemplate {
-    $files = @('nginx.conf','index.html') | ForEach-Object { Join-Path $Script:ConfigDir $_ }
-    $templates = @()
-    foreach ($file in $files) {
-        $templates += Get-TemplatesFromFile -Path $file
-    }
-    return $templates
-}
-
-function Initialize-TemplateDirectory {
-    param([pscustomobject[]]$Templates)
-    foreach ($tpl in $Templates) {
-        $dir = Split-Path -Parent $tpl.Target
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        }
-    }
-}
-
 function Set-ConfigTemplate {
-    [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         [bool]$EnableStream,
         [bool]$EnableZstd
     )
-    $templates = Get-ConfigTemplate
-    Initialize-TemplateDirectory -Templates $templates
 
-    foreach ($template in $templates) {
-        $content = $template.Content
-        if ($template.Target -eq '/etc/nginx/nginx.conf') {
-            $streamBlock = if ($EnableStream) {
-                "
+    Write-Step 'Applying configuration templates'
+
+    # Create main nginx.conf
+    $streamBlock = if ($EnableStream) {
+        @'
+
 # TCP/UDP stream (optional)
 stream {
     include /etc/nginx/stream.d/*.conf;
 }
-"
-            } else { '' }
-            $content = $content.Replace('${stream_block}', $streamBlock)
-        }
-        if ($template.Target -match 'snippets/zstd.conf') {
-            if (-not $EnableZstd) {
-                continue
-            }
-        }
-        if ($PSCmdlet.ShouldProcess($template.Target, 'Apply configuration template')) {
-            Set-Content -Path $template.Target -Value $content -NoNewline
-            try {
-                & chmod 0644 $template.Target >$null 2>&1
-            } catch {
-                Write-Warn ("Failed to set permissions on {0}: {1}" -f $template.Target, $_.Exception.Message)
-            }
-            Write-Success "Applied template $(Split-Path -Leaf $template.Target)"
-        }
+'@
+    } else { '' }
+
+    $nginxConf = @"
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /run/nginx.pid;
+
+# Load dynamic modules when present/enabled
+include /etc/nginx/modules.d/*.conf;
+
+events {
+    worker_connections 1024;
+    use epoll;
+}
+
+http {
+    # Hide NGINX version on error pages
+    server_tokens off;
+
+    include /etc/nginx/mime.types;
+
+    # Pull in modular HTTP snippets (core, security, compression, TLS, etc.)
+    include /etc/nginx/snippets/*.conf;
+
+    # Site-specific vhosts belong in conf.d (kept empty by this installer)
+    include /etc/nginx/conf.d/*.conf;
+}
+${streamBlock}
+"@
+    Set-Content -Path '/etc/nginx/nginx.conf' -Value $nginxConf -NoNewline
+    try { & chmod 0644 /etc/nginx/nginx.conf >$null 2>&1 } catch {}
+    Write-Success 'Created main nginx.conf'
+
+    # Create configuration snippets
+    $null = New-Item -ItemType Directory -Path '/etc/nginx/snippets' -Force
+
+    $snippets = @{
+        'common.conf' = @'
+# Common HTTP core settings
+default_type application/octet-stream;
+
+log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                '$status $body_bytes_sent "$http_referer" '
+                '"$http_user_agent" "$http_x_forwarded_for"';
+
+access_log /var/log/nginx/access.log main;
+
+sendfile on;
+tcp_nopush on;
+tcp_nodelay on;
+keepalive_timeout 65;
+'@
+        'security.conf' = @'
+# Security headers
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-XSS-Protection "1; mode=block" always;
+
+# Completely remove the Server header
+# This requires the headers-more module, which is enabled by default
+more_clear_headers "Server";
+'@
+        'ssl_core.conf' = @'
+# Core SSL/TLS settings (modern)
+# TLS 1.3 only to avoid legacy/weak ciphers; TLSv1.3 cipher suites are chosen by OpenSSL
+ssl_protocols TLSv1.3;
+
+# Prefer modern curves for key exchange; X25519 first, fallback to secp384r1
+# Note: ssl_conf_command requires OpenSSL 1.1.1+
+ssl_conf_command Curves X25519:secp384r1;
+
+ssl_session_cache shared:SSL:50m;
+ssl_session_timeout 1d;
+'@
+        'compression.conf' = @'
+# Gzip compression (fallback)
+gzip on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_types text/plain text/css text/xml application/json application/javascript \
+           application/xml+rss application/atom+xml image/svg+xml;
+'@
+        'zstd.conf' = @'
+# Enabled only when the zstd module is present
+zstd on;
+zstd_comp_level 7;
+zstd_types text/plain text/css text_xml application/json application/javascript \
+           application/xml+rss application/atom+xml image/svg+xml;
+'@
+        'http_hardening.snippet' = @'
+# Block HTTP/1.0 and HTTP/1.1
+# Return 444 (Connection Closed Without Response) if not HTTP/2 or HTTP/3
+if ($server_protocol ~* "HTTP/1") {
+    return 444;
+}
+'@
     }
+
+    foreach ($file in $snippets.Keys) {
+        $path = Join-Path '/etc/nginx/snippets' $file
+        Set-Content -Path $path -Value $snippets[$file] -NoNewline
+        try { & chmod 0644 $path >$null 2>&1 } catch {}
+    }
+    Write-Success 'Created configuration snippets'
+
+    # Create HTML files
+    $null = New-Item -ItemType Directory -Path '/usr/share/nginx/html' -Force
+
+    $htmlFiles = @{
+        'index.html' = @'
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Welcome to NGINX</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+            margin: 0;
+            background: #f7f9fb;
+            color: #111;
+        }
+        header {
+            background: linear-gradient(135deg, #009639, #00b36b);
+            color: #fff;
+            padding: 20px;
+        }
+        main {
+            max-width: 900px;
+            margin: 32px auto;
+            padding: 0 16px;
+        }
+        code {
+            background: #eef4f1;
+            border-radius: 4px;
+            padding: 2px 6px;
+        }
+        section {
+            background: #fff;
+            border: 1px solid #e5ece8;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,.04);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 style="margin:0">NGINX installed</h1>
+    </header>
+    <main>
+        <section>
+            <p>If you see this page, your server is running and serving content.</p>
+            <ul>
+                <li>Root: <code>/usr/share/nginx/html</code></li>
+                <li>Config: <code>/etc/nginx/nginx.conf</code></li>
+                <li>Snippets: <code>/etc/nginx/snippets/</code></li>
+                <li>Sites: <code>/etc/nginx/conf.d/</code></li>
+            </ul>
+            <p>Reload with: <code>nginx -s reload</code></p>
+            <p>Features: HTTP/3, TLS 1.3, optimized build</p>
+        </section>
+    </main>
+</body>
+</html>
+'@
+        '404.html' = @'
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>404 Not Found</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+            background: #f7f9fb;
+        }
+        main {
+            background: #fff;
+            border: 1px solid #e5ece8;
+            border-radius: 10px;
+            padding: 24px 28px;
+            box-shadow: 0 2px 4px rgba(0,0,0,.04);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1 style="margin:0 0 8px;color:#c1121f">404</h1>
+        <p>The requested resource could not be found.</p>
+        <p><a href="/" style="color:#009639;text-decoration:none">Go to homepage</a></p>
+    </main>
+</body>
+</html>
+'@
+        '50x.html' = @'
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Server error</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+            background: #f7f9fb;
+        }
+        main {
+            background: #fff;
+            border: 1px solid #e5ece8;
+            border-radius: 10px;
+            padding: 24px 28px;
+            box-shadow: 0 2px 4px rgba(0,0,0,.04);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1 style="margin:0 0 8px;color:#b08900">Something went wrong</h1>
+        <p>A temporary error occurred while processing your request.</p>
+        <p>Please try again later.</p>
+    </main>
+</body>
+</html>
+'@
+    }
+
+    foreach ($file in $htmlFiles.Keys) {
+        $path = Join-Path '/usr/share/nginx/html' $file
+        Set-Content -Path $path -Value $htmlFiles[$file] -NoNewline
+        try { & chmod 0644 $path >$null 2>&1 } catch {}
+    }
+    Write-Success 'Created HTML files'
 }
 
 function Write-ModuleLoader {
@@ -408,9 +676,9 @@ function Remove-ModuleLoader {
     }
 }
 
-# endregion -------------------------------------------------------------------
-
-# region: Core tasks ----------------------------------------------------------
+# ============================================================================
+# CORE TASKS
+# ============================================================================
 function Install-BuildDependency {
     Write-Step 'Installing build dependencies'
     $logPrefix = 'deps'
@@ -624,6 +892,7 @@ function Build-Nginx {
             $staticArgs  = @('auto/configure') + $staticArgs
         }
 
+        # Try dynamic build first
         try {
             if ($configureScript -eq '/bin/bash') {
                 Invoke-LoggedProcess -FilePath '/bin/bash' -Arguments $dynamicArgs -WorkingDirectory $sourceDir -LogName 'nginx-configure.log'
@@ -759,7 +1028,7 @@ function Write-SystemdService {
         Write-Warn 'Systemd not detected; skipping service creation.'
         return
     }
-    $servicePath = '/etc/systemd/system/nginx.service'
+    $servicePath = "/etc/systemd/system/$Script:ServiceName.service"
     $content = @'
 [Unit]
 Description=The NGINX HTTP and reverse proxy server
@@ -858,19 +1127,6 @@ server {
             & chmod 0644 $httpsConf >$null 2>&1
         } catch {
             Write-Warn ("Failed to set permissions on HTTPS configuration file: {0}" -f $_.Exception.Message)
-        }
-    }
-
-    $nginxConf = '/etc/nginx/nginx.conf'
-    if (Test-Path $nginxConf) {
-        $text = Get-Content -Path $nginxConf -Raw
-        $pattern = '(?ms)server\s*\{[^}]*listen[^}]*80[^}]*\}'
-        $updated = [System.Text.RegularExpressions.Regex]::Replace($text, $pattern, { param($m) if ($m.Value -match 'listen\s+([^;]*:)?80') { return '' } else { return $m.Value } })
-        if ($text -ne $updated) {
-            if ($PSCmdlet.ShouldProcess($nginxConf, 'Remove HTTP listeners from nginx.conf')) {
-                Set-Content -Path $nginxConf -Value $updated -NoNewline
-                Write-Info 'Removed HTTP port 80 listeners from nginx.conf'
-            }
         }
     }
 }
@@ -1061,9 +1317,9 @@ function Invoke-Verify {
     Test-NginxInstall
 }
 
-# endregion -------------------------------------------------------------------
-
-# region: Cleanup -------------------------------------------------------------
+# ============================================================================
+# CLEANUP
+# ============================================================================
 function Remove-InstallerTempData {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param()
@@ -1074,9 +1330,10 @@ function Remove-InstallerTempData {
         Remove-Item $Script:LogDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-# endregion -------------------------------------------------------------------
 
-# region: Entry point ---------------------------------------------------------
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
 $Script:FailureOccurred = $false
 try {
     switch ($Command) {
@@ -1109,4 +1366,3 @@ finally {
         Remove-InstallerTempData
     }
 }
-# endregion -------------------------------------------------------------------
