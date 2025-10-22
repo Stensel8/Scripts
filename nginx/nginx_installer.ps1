@@ -1028,7 +1028,7 @@ function Write-SystemdService {
         Write-Warn 'Systemd not detected; skipping service creation.'
         return
     }
-    $servicePath = "/etc/systemd/system/$Script:ServiceName.service"
+    $servicePath = "/etc/systemd/system/${Script:ServiceName}.service"
     $content = @'
 [Unit]
 Description=The NGINX HTTP and reverse proxy server
