@@ -335,7 +335,7 @@ EOF
 # Enabled only when the zstd module is present
 zstd on;
 zstd_comp_level 7;
-zstd_types text/plain text/css text_xml application/json application/javascript \
+zstd_types text/plain text/css text/xml application/json application/javascript \
            application/xml+rss application/atom+xml image/svg+xml;
 EOF
 
