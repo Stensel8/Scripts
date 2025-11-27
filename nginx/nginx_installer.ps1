@@ -1,3 +1,19 @@
+<#
+.SYNOPSIS
+    NGINX Installer Script for Linux (PowerShell)
+
+.DESCRIPTION
+    Builds and installs NGINX with OpenSSL 3.6, HTTP/3, zstd compression,
+    and ACME support on Linux.
+
+.PARAMETER Command
+    install - Build and install NGINX
+    remove  - Uninstall NGINX
+
+.EXAMPLE
+    ./nginx_installer.ps1 -Command install
+#>
+
 #!/usr/bin/env pwsh
 #Requires -Version 7.0
 
@@ -9,15 +25,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Linux only
-if (-not $IsLinux -and -not ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -eq 'Unix')) {
+# Linux only check
+if (-not $IsLinux) {
     Write-Host "ERROR: This script is for Linux only." -ForegroundColor Red
     exit 1
 }
 
 # ============================================================================
-# Version configuration for NGINX build script
-# Update these when new versions are released
+# Version Configuration
 # ============================================================================
 
 # NGINX
@@ -44,11 +59,14 @@ $Script:HEADERS_MORE_SHA256  = 'dde68d3fa2a9fc7f52e436d2edc53c6d703dcd911283965d
 $Script:ZSTD_MODULE_VERSION = '0.1.1'
 $Script:ZSTD_MODULE_SHA256  = '707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41'
 
+# ACME Module
+$Script:ACME_MODULE_VERSION = '0.3.0'
+$Script:ACME_MODULE_SHA256  = '1fa2b29d6e84e8aeffa15e91841f5a521a7537a8ce30321e56f4c1cb06d15440'
+
 # ============================================================================
-# Static configuration (paths, directories, URLs)
+# Static Configuration
 # ============================================================================
 
-$Script:SCRIPT_DIR = $PSScriptRoot
 $Script:BUILD_DIR  = "/root/nginx-build-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:BACKUP_DIR = "/root/nginx-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:LOG_FILE   = "/var/log/nginx-installer-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
@@ -57,16 +75,17 @@ $Script:LOG_FILE   = "/var/log/nginx-installer-$(Get-Date -Format 'yyyyMMdd-HHmm
 $null = New-Item -ItemType Directory -Path $Script:BUILD_DIR -Force -ErrorAction SilentlyContinue
 $null = New-Item -ItemType Directory -Path (Split-Path $Script:LOG_FILE -Parent) -Force -ErrorAction SilentlyContinue
 
-# Download URLs from version block
+# Download URLs
 $Script:NGINX_URL        = "https://nginx.org/download/nginx-$($Script:NGINX_VERSION).tar.gz"
 $Script:OPENSSL_URL      = "https://github.com/openssl/openssl/releases/download/openssl-$($Script:OPENSSL_VERSION)/openssl-$($Script:OPENSSL_VERSION).tar.gz"
 $Script:PCRE2_URL        = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$($Script:PCRE2_VERSION)/pcre2-$($Script:PCRE2_VERSION).tar.gz"
 $Script:ZLIB_URL         = "https://zlib.net/zlib-$($Script:ZLIB_VERSION).tar.gz"
 $Script:HEADERS_MORE_URL = "https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v$($Script:HEADERS_MORE_VERSION).tar.gz"
 $Script:ZSTD_MODULE_URL  = "https://github.com/tokers/zstd-nginx-module/archive/refs/tags/$($Script:ZSTD_MODULE_VERSION).tar.gz"
+$Script:ACME_MODULE_URL  = "https://github.com/nginx/nginx-acme/releases/download/v$($Script:ACME_MODULE_VERSION)/nginx-acme-$($Script:ACME_MODULE_VERSION).tar.gz"
 
 # ============================================================================
-# Helpers
+# Helper Functions
 # ============================================================================
 
 function Write-Log {
@@ -110,7 +129,7 @@ function Get-File {
         return
     }
 
-    Write-Log 'INFO' "Downloading $(Split-Path -Leaf $OutFile)"
+    Write-Log 'INFO' "Downloading $(Split-Path -Leaf $OutFile)..."
 
     try {
         Push-Location $Script:BUILD_DIR
@@ -125,8 +144,20 @@ function Get-File {
     Test-Hash -File $fullPath -Expected $Hash
 }
 
+function Detect-PkgMgr {
+    if (Get-Command apt-get -ErrorAction SilentlyContinue) {
+        return "apt"
+    } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
+        return "dnf"
+    } elseif (Get-Command yum -ErrorAction SilentlyContinue) {
+        return "yum"
+    } else {
+        return "unknown"
+    }
+}
+
 # ============================================================================
-# Dependencies
+# System Dependencies
 # ============================================================================
 
 function Install-Dependencies {
@@ -143,28 +174,75 @@ function Install-Dependencies {
 
     Write-Log 'INFO' 'Installing build dependencies'
 
-    if (Get-Command apt-get -ErrorAction SilentlyContinue) {
-        $env:DEBIAN_FRONTEND = 'noninteractive'
-        & apt-get update -qq 2>&1 | Out-Null
-        & apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev curl gcc make 2>&1 | Out-Null
-    } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
-        & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl 2>&1 | Out-Null
-    } elseif (Get-Command yum -ErrorAction SilentlyContinue) {
-        & yum install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl 2>&1 | Out-Null
-    } else {
-        Stop-Script "Unsupported package manager"
+    $mgr = Detect-PkgMgr
+
+    switch ($mgr) {
+        'apt' {
+            $env:DEBIAN_FRONTEND = 'noninteractive'
+            & apt-get update -qq 2>&1 | Out-Null
+            & apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev curl gcc make cargo pkg-config clang gawk cmake 2>&1 | Out-Null
+        }
+        'dnf' {
+            & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
+        }
+        'yum' {
+            & yum install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconfig clang gawk cmake 2>&1 | Out-Null
+        }
+        default {
+            Stop-Script "Unsupported package manager"
+        }
     }
 
+    # Verify cargo availability
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Log 'WARN' 'Cargo not found. Installing rustup...'
+        bash -lc "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" | Out-Null
+    }
     Write-Log 'INFO' 'Dependencies installed'
 }
 
+function Update-SystemPackages {
+    try {
+        $uid = & id -u 2>$null
+        if ($uid -ne 0) { Stop-Script "Run as root" }
+    } catch {
+        Stop-Script "Cannot determine user ID; run as root"
+    }
+
+    Write-Log 'INFO' 'Updating system packages'
+
+    $mgr = Detect-PkgMgr
+
+    switch ($mgr) {
+        'apt' {
+            $env:DEBIAN_FRONTEND = 'noninteractive'
+            & apt-get update -qq 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Log 'WARN' 'apt-get update failed' }
+            & apt-get upgrade -y -q 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Stop-Script 'apt-get upgrade failed' }
+        }
+        'dnf' {
+            & dnf upgrade -y -q 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Stop-Script 'dnf upgrade failed' }
+        }
+        'yum' {
+            & yum update -y -q 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Stop-Script 'yum update failed' }
+        }
+        default {
+            Write-Log 'WARN' 'Unable to detect package manager'
+        }
+    }
+
+    Write-Log 'INFO' 'System packages updated'
+}
+
 # ============================================================================
-# Download sources
+# Download Sources
 # ============================================================================
 
 function Get-Sources {
     Push-Location $Script:BUILD_DIR
-
     Write-Log 'INFO' 'Downloading sources'
 
     Get-File $Script:NGINX_URL        "nginx.tgz"   $Script:NGINX_SHA256
@@ -173,8 +251,12 @@ function Get-Sources {
     Get-File $Script:ZLIB_URL         "zlib.tgz"    $Script:ZLIB_SHA256
     Get-File $Script:HEADERS_MORE_URL "headers.tgz" $Script:HEADERS_MORE_SHA256
     Get-File $Script:ZSTD_MODULE_URL  "zstd.tgz"    $Script:ZSTD_MODULE_SHA256
+    Get-File $Script:ACME_MODULE_URL  "acme.tgz"    $Script:ACME_MODULE_SHA256
 
     Write-Log 'INFO' 'Extracting archives'
+    
+    # Cleanup previous extractions
+    Remove-Item nginx, openssl, pcre2, zlib, headers-more, zstd-module, nginx-acme -Recurse -Force -ErrorAction SilentlyContinue
 
     & tar xzf nginx.tgz
     Move-Item "nginx-$Script:NGINX_VERSION" nginx -Force
@@ -194,19 +276,22 @@ function Get-Sources {
     & tar xzf zstd.tgz
     Move-Item "zstd-nginx-module-$Script:ZSTD_MODULE_VERSION" zstd-module -Force
 
+    & tar xzf acme.tgz
+    Move-Item "nginx-acme-$Script:ACME_MODULE_VERSION" nginx-acme -Force
+
     Pop-Location
     Write-Log 'INFO' 'Sources ready'
 }
 
 # ============================================================================
-# Build
+# Build Functions
 # ============================================================================
 
 function Build-Nginx {
     $useSystemSsl = $false
     $sslOpt       = ""
 
-    # WSL ARM64 -> use system OpenSSL
+    # WSL ARM64 check
     $kernelInfo = & uname -r
     $arch       = & uname -m
     if ($kernelInfo -match 'microsoft' -and $arch -eq 'aarch64') {
@@ -214,22 +299,21 @@ function Build-Nginx {
         $useSystemSsl = $true
     }
 
-    # Clean /tmp
+    # Clean temporary files
     Get-ChildItem /tmp -Filter 'cc*'            -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem /tmp -Filter 'tmp.*'          -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem /tmp -Filter 'nginx-build-*'  -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    Get-ChildItem /tmp -Filter 'nginx-logs-*'   -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Check /tmp space
+    # Check disk space in /tmp
     $tmpSpace = (& df /tmp | Select-Object -Skip 1 | ForEach-Object {
         $_.Split([char[]]@(' ', "`t"), [System.StringSplitOptions]::RemoveEmptyEntries)[3]
     })
     if ([int]$tmpSpace -lt 1048576) {
-        Write-Log 'WARN' "Low disk space in /tmp, using build directory for temp files"
+        Write-Log 'WARN' "Low disk space in /tmp, using build directory"
         $env:TMPDIR = $Script:BUILD_DIR
     }
 
-    # Ensure cc symlink
+    # Ensure cc symlink exists
     $ccPath = Get-Command cc -ErrorAction SilentlyContinue
     if (-not $ccPath) {
         $gccPath = Get-Command gcc -ErrorAction SilentlyContinue
@@ -239,64 +323,75 @@ function Build-Nginx {
         }
     }
 
-    # Build OpenSSL if not using system
+    # Build OpenSSL standalone for ACME module
     if (-not $useSystemSsl) {
-        Write-Log 'INFO' "Building OpenSSL $Script:OPENSSL_VERSION"
+        Write-Log 'INFO' "Building OpenSSL $Script:OPENSSL_VERSION (Standalone)"
         Push-Location (Join-Path $Script:BUILD_DIR 'openssl')
 
         $archConfig = switch ($arch) {
-            'x86_64' { 'linux-x86_64' }
+            'x86_64'  { 'linux-x86_64' }
             'aarch64' { 'linux-aarch64' }
-            'armv7l' { 'linux-armv4' }
-            Default { 'linux-generic64' }
+            'armv7l'  { 'linux-armv4' }
+            Default   { 'linux-generic64' }
         }
 
-        $configOutput = bash -c "export TMPDIR='$Script:BUILD_DIR' && ./Configure $archConfig --prefix=`$(pwd)/../openssl-install --openssldir=`$(pwd)/../openssl-install/ssl enable-tls1_3 no-shared -fPIC 2>&1 | grep -v '^DEBUG:' | grep -v '^No value given'"
+        $configOutput = bash -c "export TMPDIR='$Script:BUILD_DIR' && ./Configure $archConfig --prefix=`$(pwd)/../openssl-install --openssldir=`$(pwd)/../openssl-install/ssl enable-tls1_3 shared -fPIC 2>&1 | grep -v '^DEBUG:' | grep -v '^No value given'"
         if ($LASTEXITCODE -ne 0) {
-            Write-Log 'WARN' "OpenSSL configure failed: $configOutput"
+            Write-Log 'WARN' "OpenSSL configure failed"
             Write-Log 'WARN' 'Using system OpenSSL'
             $useSystemSsl = $true
         } else {
             $makeOutput = bash -c "export TMPDIR='$Script:BUILD_DIR' && make -j`$(nproc) 2>&1 | grep -v '^DEBUG:'"
             if ($LASTEXITCODE -ne 0) {
-                Write-Log 'WARN' "OpenSSL build failed: $($makeOutput | Select-Object -Last 10)"
+                Write-Log 'WARN' "OpenSSL build failed"
                 Write-Log 'WARN' 'Using system OpenSSL'
                 $useSystemSsl = $true
             } else {
                 bash -c "make install_sw 2>&1 | grep -v '^DEBUG:'" | Out-Host
                 $sslOpt = "--with-openssl=$(Join-Path $Script:BUILD_DIR 'openssl')"
-                Write-Log 'INFO' 'OpenSSL built'
+                Write-Log 'INFO' 'OpenSSL built successfully'
             }
         }
-
         Pop-Location
     }
 
-    # Install system OpenSSL if needed
+    # Fallback to system OpenSSL
     if ($useSystemSsl) {
-        if (Get-Command apt-get -ErrorAction SilentlyContinue) {
-            & apt-get install -y libssl-dev | Out-Null
-        } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
-            & dnf install -y openssl-devel | Out-Null
-        } elseif (Get-Command yum -ErrorAction SilentlyContinue) {
-            & yum install -y openssl-devel | Out-Null
+        $mgr = Detect-PkgMgr
+        switch ($mgr) {
+            'apt' { & apt-get install -y libssl-dev | Out-Null }
+            'dnf' { & dnf install -y openssl-devel | Out-Null }
+            'yum' { & yum install -y openssl-devel | Out-Null }
         }
         Write-Log 'INFO' 'Using system OpenSSL'
     }
 
-    # Build Nginx
+    # Build NGINX
     Write-Log 'INFO' "Building Nginx $Script:NGINX_VERSION"
     Push-Location (Join-Path $Script:BUILD_DIR 'nginx')
 
-    $pcre2Path  = Join-Path $Script:BUILD_DIR 'pcre2'
-    $zlibPath   = Join-Path $Script:BUILD_DIR 'zlib'
+    # Verify libzstd availability
+    $ldconfigOut = bash -lc 'ldconfig -p 2>/dev/null || true'
+    if (-not ($ldconfigOut -match 'libzstd.so')) {
+        $paths = @('/usr/lib/libzstd.so','/usr/lib64/libzstd.so','/usr/local/lib/libzstd.so')
+        $found = $false
+        foreach ($p in $paths) { if (Test-Path $p) { $found = $true; break } }
+        if (-not $found) {
+            Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
+        }
+    }
+
+    $pcre2Path   = Join-Path $Script:BUILD_DIR 'pcre2'
+    $zlibPath    = Join-Path $Script:BUILD_DIR 'zlib'
     $headersPath = Join-Path $Script:BUILD_DIR 'headers-more'
-    $zstdPath   = Join-Path $Script:BUILD_DIR 'zstd-module'
+    $zstdPath    = Join-Path $Script:BUILD_DIR 'zstd-module'
 
     $configCmd = @"
 export TMPDIR='$Script:BUILD_DIR'
 export CC=gcc
+export LDFLAGS='-lzstd'
 ./configure \
+  --with-compat \
   --prefix=/usr/local/nginx \
   --sbin-path=/usr/sbin/nginx \
   --conf-path=/etc/nginx/nginx.conf \
@@ -333,103 +428,131 @@ export CC=gcc
         Stop-Script 'Nginx configure failed'
     }
 
+    # Patch Makefile for shared libzstd
+    if (Test-Path "objs/Makefile") {
+        Write-Log 'INFO' 'Patching nginx Makefile for shared libzstd'
+        bash -c "sed -i 's/-l:libzstd\.a/-lzstd/g' objs/Makefile" | Out-Null
+    }
+
     $makeOutput = bash -c "export TMPDIR='$Script:BUILD_DIR' && make -j`$(nproc) 2>&1"
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "Make output: $($makeOutput | Select-Object -Last 20)"
         Stop-Script 'Nginx build failed'
     }
 
-    Pop-Location
+    # Build ACME Module
+    Write-Log 'INFO' "Building ACME module $Script:ACME_MODULE_VERSION"
+    Push-Location (Join-Path $Script:BUILD_DIR 'nginx-acme')
+
+    $env:NGINX_BUILD_DIR = Join-Path $Script:BUILD_DIR 'nginx/objs'
+    $env:NGX_ACME_STATE_PREFIX = '/var/cache/nginx'
+
+    # Source cargo env helper
+    $sourceCargo = 'if [ -f "$HOME/.cargo/env" ]; then source "$HOME/.cargo/env"; fi'
+
+    # Verify Rust toolchain
+    $rustcVer = bash -lc "$sourceCargo && rustc --version 2>/dev/null"
+    if (-not $rustcVer) {
+        Write-Log 'WARN' 'rustc not found, installing rustup...'
+        bash -lc "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" | Out-Null
+    }
+
+    $opensslInstall = Join-Path $Script:BUILD_DIR 'openssl-install'
+    $acmeEnv = ""
+    if (Test-Path $opensslInstall) {
+        $lib64 = Join-Path $opensslInstall 'lib64'
+        $libDir = if (Test-Path $lib64) { $lib64 } else { Join-Path $opensslInstall 'lib' }
+        
+        Write-Log 'INFO' "Using OpenSSL install for ACME (Static Link): $opensslInstall"
+        $acmeEnv = "export OPENSSL_DIR='$opensslInstall' && export OPENSSL_LIB_DIR='$libDir' && export OPENSSL_INCLUDE_DIR='$opensslInstall/include' && export OPENSSL_STATIC=1"
+    }
+
+    $cmd = "$sourceCargo && $acmeEnv && cargo build --release 2>&1"
+    $acmeOutput = bash -lc $cmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log 'ERROR' "ACME build failed: $($acmeOutput | Select-Object -Last 20)"
+        Stop-Script 'ACME module build failed'
+    }
+
+    New-Item -ItemType Directory -Path "$($Script:BUILD_DIR)/nginx-acme/objs" -Force | Out-Null
+    Copy-Item 'target/release/libnginx_acme.so' -Destination "$($Script:BUILD_DIR)/nginx-acme/objs/ngx_http_acme_module.so" -Force
+
+    Pop-Location # nginx-acme
+    Pop-Location # nginx
+    Write-Log 'INFO' 'ACME module built successfully'
     Write-Log 'INFO' 'Build complete'
 }
 
 # ============================================================================
-# HTML + TLS + nginx.conf
+# Configuration Functions
 # ============================================================================
 
 function Install-HtmlFiles {
     Write-Log 'INFO' "Installing HTML files"
-
     $htmlDir = '/usr/share/nginx/html'
-    if (-not (Test-Path $htmlDir)) {
-        New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null
-    }
+    New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null
 
-    $indexFile = Join-Path $htmlDir 'index.html'
-    @'
-<!doctype html>
+    $indexContent = @'
+<!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Welcome to nginx</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; color: #333; }
-      h1 { color: #555; }
-      code { background: #f5f5f5; padding: 0.1rem 0.3rem; }
-    </style>
-  </head>
-  <body>
-    <h1>nginx is running</h1>
-    <p>This page was installed by the custom nginx build script.</p>
-    <p>Default document root: <code>/usr/share/nginx/html</code></p>
-  </body>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+</body>
 </html>
-'@ | Out-File -FilePath $indexFile -Encoding utf8 -NoNewline
-
-    $errorFile = Join-Path $htmlDir '50x.html'
-    @'
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Server error</title>
-  </head>
-  <body>
-    <h1>Server error</h1>
-    <p>An error occurred while processing your request.</p>
-  </body>
-</html>
-'@ | Out-File -FilePath $errorFile -Encoding utf8 -NoNewline
+'@
+    $indexContent | Out-File (Join-Path $htmlDir 'index.html') -Encoding utf8 -Force
 
     bash -c "chmod 0644 $htmlDir/*.html 2>/dev/null || true" | Out-Null
 }
 
 function New-SelfSignedCertificate {
     Write-Log 'INFO' 'Generating self-signed TLS certificate'
-
     $sslDir = '/etc/nginx/ssl'
-    if (-not (Test-Path $sslDir)) {
-        New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
-    }
+    New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
 
-    $opensslPath = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
-    if (-not $opensslPath) {
-        $candidate1 = Join-Path $Script:BUILD_DIR 'openssl-install/bin/openssl'
-        $candidate2 = Join-Path $Script:BUILD_DIR 'openssl/apps/openssl'
-        if (Test-Path $candidate1) { $opensslPath = $candidate1 }
-        elseif (Test-Path $candidate2) { $opensslPath = $candidate2 }
+    # Prefer built OpenSSL binary
+    $opensslBin = Join-Path $Script:BUILD_DIR 'openssl-install/bin/openssl'
+    if (-not (Test-Path $opensslBin)) {
+         $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
     }
-
-    if (-not $opensslPath) {
-        if (Get-Command apt-get -ErrorAction SilentlyContinue) {
-            & apt-get update -qq 2>&1 | Out-Null
-            & apt-get install -y openssl 2>&1 | Out-Null
-        } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
-            & dnf install -y openssl 2>&1 | Out-Null
-        } elseif (Get-Command yum -ErrorAction SilentlyContinue) {
-            & yum install -y openssl 2>&1 | Out-Null
+    
+    # Fallback: install openssl
+    if (-not $opensslBin) {
+        $mgr = Detect-PkgMgr
+        switch ($mgr) {
+            'apt' { & apt-get install -y openssl | Out-Null }
+            'dnf' { & dnf install -y openssl | Out-Null }
+            'yum' { & yum install -y openssl | Out-Null }
         }
-        $opensslPath = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
+        $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
     }
 
-    if (-not $opensslPath) { Stop-Script 'openssl not found' }
+    if (-not $opensslBin) { Stop-Script 'openssl not found' }
 
     $keyPath = "$sslDir/nginx.key"
     $crtPath = "$sslDir/nginx.crt"
+    
+    # Setup library path for custom OpenSSL
+    $envPrefix = ""
+    if ($opensslBin -match 'openssl-install') {
+        $libDir = Join-Path $Script:BUILD_DIR 'openssl-install/lib64'
+        if (-not (Test-Path $libDir)) { $libDir = Join-Path $Script:BUILD_DIR 'openssl-install/lib' }
+        $envPrefix = "LD_LIBRARY_PATH='$libDir':`$LD_LIBRARY_PATH"
+        Write-Log 'INFO' "Using built openssl: $opensslBin"
+    }
 
-    $output = bash -c "OPENSSL_CONF=/dev/null '$opensslPath' req -x509 -newkey ec -pkeyopt ec_paramgen_curve:secp384r1 -days 365 -nodes -keyout '$keyPath' -out '$crtPath' -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1"
-
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $crtPath)) {
+    $cmd = "$envPrefix OPENSSL_CONF=/dev/null '$opensslBin' req -x509 -newkey ec -pkeyopt ec_paramgen_curve:secp384r1 -days 365 -nodes -keyout '$keyPath' -out '$crtPath' -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1"
+    $output = bash -c $cmd
+    
+    if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "OpenSSL output: $output"
         Stop-Script 'Certificate generation failed'
     }
@@ -439,11 +562,11 @@ function New-SelfSignedCertificate {
 
 function New-NginxConfig {
     Write-Log 'INFO' 'Creating nginx configuration'
-
-    $nginxConfig = @'
+    $conf = @'
 load_module /etc/nginx/modules/ngx_http_zstd_filter_module.so;
 load_module /etc/nginx/modules/ngx_http_zstd_static_module.so;
 load_module /etc/nginx/modules/ngx_http_headers_more_filter_module.so;
+load_module /etc/nginx/modules/ngx_http_acme_module.so;
 
 user nginx;
 worker_processes auto;
@@ -455,51 +578,44 @@ events {
 }
 
 http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
 
-    # Hide server version and set a generic Server header
     server_tokens off;
     more_set_headers 'Server: nginx';
 
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
 
-    access_log /var/log/nginx/access.log main;
+    access_log  /var/log/nginx/access.log  main;
 
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
+    sendfile        on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
+    keepalive_timeout  65;
     types_hash_max_size 2048;
 
     # Gzip compression
-    gzip on;
+    gzip  on;
     gzip_vary on;
     gzip_proxied any;
     gzip_comp_level 6;
-    gzip_types text/plain text/css text/xml text/javascript
-               application/json application/javascript application/xml+rss
-               application/rss+xml font/truetype font/opentype
-               application/vnd.ms-fontobject image/svg+xml;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
 
     # Zstd compression
     zstd on;
     zstd_comp_level 6;
-    zstd_types text/plain text/css text/xml text/javascript
-               application/json application/javascript application/xml+rss
-               application/rss+xml font/truetype font/opentype
-               application/vnd.ms-fontobject image/svg+xml;
+    zstd_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
 
-    # SSL/TLS settings
+    # SSL configuration
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
     ssl_session_tickets off;
 
-    # HTTP/3 QUIC settings
+    # QUIC configuration
     quic_retry on;
     ssl_early_data on;
 
@@ -511,11 +627,8 @@ http {
     }
 
     server {
-        # HTTP/1.1 and HTTP/2 over TCP
         listen 443 ssl;
         listen [::]:443 ssl;
-
-        # HTTP/3 over QUIC (UDP)
         listen 443 quic reuseport;
         listen [::]:443 quic reuseport;
 
@@ -523,84 +636,69 @@ http {
         http3 on;
 
         server_name localhost;
+
         ssl_certificate /etc/nginx/ssl/nginx.crt;
         ssl_certificate_key /etc/nginx/ssl/nginx.key;
 
-        # Advertise HTTP/3 support
         add_header Alt-Svc 'h3=":443"; ma=86400' always;
         add_header X-Protocol $server_protocol always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
         location / {
-            root /usr/share/nginx/html;
-            index index.html index.htm;
+            root   /usr/share/nginx/html;
+            index  index.html index.htm;
         }
 
-        error_page 500 502 503 504 /50x.html;
+        error_page   500 502 503 504  /50x.html;
         location = /50x.html {
-            root /usr/share/nginx/html;
+            root   /usr/share/nginx/html;
         }
     }
 }
 '@
-
-    $nginxConfig | Out-File -FilePath '/etc/nginx/nginx.conf' -Encoding utf8 -NoNewline
+    $conf | Out-File '/etc/nginx/nginx.conf' -Encoding utf8 -Force
 }
 
 # ============================================================================
-# Install / Remove
+# Install/Remove Functions
 # ============================================================================
 
 function Install-Nginx {
     Write-Log 'INFO' 'Installing Nginx'
-
+    
+    # Backup existing configuration
     if (Test-Path '/etc/nginx') {
-        if (-not (Test-Path $Script:BACKUP_DIR)) {
-            New-Item -ItemType Directory -Path $Script:BACKUP_DIR -Force | Out-Null
-        }
-        Copy-Item -Path '/etc/nginx' -Destination "$Script:BACKUP_DIR/" -Recurse -Force
+        New-Item -ItemType Directory -Path $Script:BACKUP_DIR -Force | Out-Null
+        Copy-Item '/etc/nginx' "$Script:BACKUP_DIR/" -Recurse -Force
     }
 
     Push-Location (Join-Path $Script:BUILD_DIR 'nginx')
-    $installOutput = bash -c 'make install 2>&1'
+    $out = bash -c 'make install 2>&1'
     if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        Write-Log 'ERROR' "Install output: $($installOutput | Select-Object -Last 10)"
+        Write-Log 'ERROR' "Install output: $out"
         Stop-Script 'Nginx install failed'
     }
     Pop-Location
 
-    $dirs = @(
-        '/etc/nginx/conf.d',
-        '/etc/nginx/modules',
-        '/etc/nginx/sites-available',
-        '/etc/nginx/sites-enabled',
-        '/var/log/nginx',
-        '/var/cache/nginx',
-        '/usr/share/nginx/html'
-    )
-    foreach ($dir in $dirs) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        }
-    }
+    # Create directories
+    New-Item -ItemType Directory -Force -Path '/etc/nginx/conf.d','/etc/nginx/modules','/etc/nginx/sites-available','/etc/nginx/sites-enabled','/var/log/nginx','/var/cache/nginx','/usr/share/nginx/html' | Out-Null
 
-    $objsDir = Join-Path $Script:BUILD_DIR 'nginx/objs'
-    Get-ChildItem $objsDir -Filter '*.so' -ErrorAction SilentlyContinue |
-        ForEach-Object { Copy-Item $_.FullName -Destination '/etc/nginx/modules/' -Force }
+    # Install dynamic modules
+    Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination '/etc/nginx/modules/' -Force
+    Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination '/etc/nginx/modules/' -Force
 
+    # Install configuration files
     Install-HtmlFiles
     New-SelfSignedCertificate
     New-NginxConfig
 
-    bash -c 'id nginx 2>/dev/null' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        bash -c 'useradd -r -s /sbin/nologin nginx' | Out-Null
-    }
+    # Create nginx user
+    bash -c 'id nginx 2>/dev/null || useradd -r -s /sbin/nologin nginx' | Out-Null
     bash -c 'chown -R nginx:nginx /var/log/nginx /var/cache/nginx' | Out-Null
     bash -c 'chmod 755 /etc/nginx/conf.d /etc/nginx/modules' | Out-Null
 
-    $serviceContent = @'
+    # Create systemd service
+    $svc = @'
 [Unit]
 Description=Nginx HTTP Server
 After=network.target
@@ -617,73 +715,47 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 '@
-    $serviceContent | Out-File -FilePath '/etc/systemd/system/nginx.service' -Encoding utf8 -NoNewline
+    $svc | Out-File '/etc/systemd/system/nginx.service' -Encoding utf8 -Force
 
-    bash -c 'systemctl daemon-reload' | Out-Null
-    bash -c 'systemctl enable nginx 2>&1' | Out-Null
-    bash -c 'nginx -t && systemctl start nginx' | Out-Null
+    bash -c 'systemctl daemon-reload && systemctl enable nginx && nginx -t && systemctl start nginx' 2>&1 | Out-Null
 
     Write-Log 'INFO' "Nginx $Script:NGINX_VERSION with OpenSSL $Script:OPENSSL_VERSION installed"
     Write-Log 'INFO' "Access: https://localhost"
     bash -c 'nginx -V 2>&1 | head -n1'
-
-    if (-not (Test-NginxInstallation)) {
-        Write-Log 'WARN' 'Post-install checks detected issues'
-    }
+    Test-NginxInstallation
 }
 
 function Test-NginxInstallation {
     Write-Log 'INFO' 'Running post-install checks'
-
-    if (-not (Test-Path '/etc/nginx/ssl/nginx.crt') -or -not (Test-Path '/etc/nginx/ssl/nginx.key')) {
+    
+    if (-not (Test-Path '/etc/nginx/ssl/nginx.crt')) {
         Write-Log 'ERROR' 'SSL certificates missing'
-        return $false
+        return
     }
-
-    $testResult = bash -c 'nginx -t 2>&1'
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log 'ERROR' "nginx -t failed: $testResult"
-        return $false
-    }
-
-    $serviceStatus = bash -c 'systemctl is-active nginx 2>/dev/null'
-    if ($serviceStatus -ne 'active') {
-        Write-Log 'WARN' "Nginx service not active (status: $serviceStatus)"
-    }
-
-    bash -c 'curl -sk https://localhost -o /dev/null -w "%{http_code}" 2>/dev/null' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log 'WARN' 'Unable to verify https://localhost response'
+    
+    if (-not (Test-Path '/etc/nginx/modules/ngx_http_acme_module.so')) {
+        Write-Log 'WARN' 'ACME module not found'
     } else {
-        Write-Log 'INFO' 'All checks passed'
+        Write-Log 'INFO' 'ACME module present'
     }
 
-    return $true
+    $t = bash -c 'nginx -t 2>&1'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log 'ERROR' "nginx -t failed: $t"
+    }
+
+    bash -c 'curl -k https://localhost -I' 2>&1 | Out-Null
 }
 
 function Remove-Nginx {
     Write-Log 'INFO' 'Removing Nginx'
+    
     bash -c 'systemctl stop nginx 2>/dev/null || true' | Out-Null
-
-    $pathsToRemove = @(
-        '/usr/sbin/nginx',
-        '/etc/nginx',
-        '/var/log/nginx',
-        '/var/cache/nginx'
-    )
-    foreach ($path in $pathsToRemove) {
-        if (Test-Path $path) {
-            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-
+    Remove-Item '/usr/sbin/nginx','/etc/nginx','/var/log/nginx','/var/cache/nginx' -Recurse -Force -ErrorAction SilentlyContinue
     bash -c 'userdel nginx 2>/dev/null || true' | Out-Null
+    
     Write-Log 'INFO' 'Nginx removed'
 }
-
-# ============================================================================
-# Pre-flight checks
-# ============================================================================
 
 function Test-RunningWebServers {
     $port443 = bash -c "lsof -ti :443 2>/dev/null | head -n1"
@@ -691,42 +763,36 @@ function Test-RunningWebServers {
         $proc = bash -c "ps -p $port443 -o comm= 2>/dev/null"
         Write-Log 'WARN' "Port 443 in use by: $proc"
         $response = Read-Host 'Stop conflicting services? [y/N]'
-        if ($response -eq 'y' -or $response -eq 'Y') {
-            bash -c 'systemctl stop apache2 2>/dev/null || true' | Out-Null
-            bash -c 'systemctl stop httpd 2>/dev/null || true' | Out-Null
-            bash -c 'systemctl stop nginx 2>/dev/null || true' | Out-Null
+        if ($response -match '^[Yy]') {
+            bash -c 'systemctl stop apache2 httpd nginx 2>/dev/null || true' | Out-Null
             Write-Log 'INFO' 'Services stopped'
         } else {
-            Write-Log 'ERROR' 'Cannot proceed with port 443 in use'
             Stop-Script 'Port 443 in use'
         }
     }
 }
 
 # ============================================================================
-# Main
+# Main Entry Point
 # ============================================================================
 
 try {
     switch ($Command) {
         'install' {
+            Update-SystemPackages
             Test-RunningWebServers
             Install-Dependencies
             Get-Sources
             Build-Nginx
             Install-Nginx
-            Write-Host ""
-            Write-Host "Installation log: $Script:LOG_FILE"
+            Write-Host "`nInstallation log: $Script:LOG_FILE"
         }
         'remove' {
             Remove-Nginx
-            Write-Host ""
-            Write-Host "Removal log: $Script:LOG_FILE"
+            Write-Host "`nRemoval log: $Script:LOG_FILE"
         }
     }
 }
 finally {
-    if (Test-Path $Script:BUILD_DIR) {
-        Remove-Item -Path $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
 }
