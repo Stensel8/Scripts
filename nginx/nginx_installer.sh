@@ -26,20 +26,20 @@ fi
 # ============================================================================
 
 # NGINX
-NGINX_VERSION="1.29.3"
-NGINX_SHA256="9befcced12ee09c2f4e1385d7e8e21c91f1a5a63b196f78f897c2d044b8c9312"
+NGINX_VERSION="1.29.5"
+NGINX_SHA256="6744768a4114880f37b13a0443244e731bcb3130c0a065d7e37d8fd589ade374"
 
 # OpenSSL
-OPENSSL_VERSION="3.6.0"
-OPENSSL_SHA256="b6a5f44b7eb69e3fa35dbf15524405b44837a481d43d81daddde3ff21fcbb8e9"
+OPENSSL_VERSION="3.6.1"
+OPENSSL_SHA256="b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e"
 
 # PCRE2
 PCRE2_VERSION="10.47"
 PCRE2_SHA256="c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16"
 
 # Zlib
-ZLIB_VERSION="1.3.1"
-ZLIB_SHA256="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+ZLIB_VERSION="1.3.2"
+ZLIB_SHA256="bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
 
 # Headers-More Module
 HEADERS_MORE_VERSION="0.39"
@@ -50,8 +50,8 @@ ZSTD_MODULE_VERSION="0.1.1"
 ZSTD_MODULE_SHA256="707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41"
 
 # ACME Module
-ACME_MODULE_VERSION="0.3.0"
-ACME_MODULE_SHA256="1fa2b29d6e84e8aeffa15e91841f5a521a7537a8ce30321e56f4c1cb06d15440"
+ACME_MODULE_VERSION="0.3.1"
+ACME_MODULE_SHA256="be3d3d10f042930a3bf348731698eadb7003d224a863c53b719ccd28721572c3"
 
 # ============================================================================
 # Static Configuration
@@ -62,10 +62,10 @@ BACKUP_DIR="/root/nginx-backup-$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/var/log/nginx-installer-$(date +%Y%m%d-%H%M%S).log"
 
 # Download URLs
-NGINX_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+NGINX_URL="https://github.com/nginx/nginx/releases/download/release-${NGINX_VERSION}/nginx-${NGINX_VERSION}.tar.gz"
 OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 PCRE2_URL="https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
-ZLIB_URL="https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz"
+ZLIB_URL="https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
 HEADERS_MORE_URL="https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v${HEADERS_MORE_VERSION}.tar.gz"
 ZSTD_MODULE_URL="https://github.com/tokers/zstd-nginx-module/archive/refs/tags/${ZSTD_MODULE_VERSION}.tar.gz"
 ACME_MODULE_URL="https://github.com/nginx/nginx-acme/releases/download/v${ACME_MODULE_VERSION}/nginx-acme-${ACME_MODULE_VERSION}.tar.gz"
@@ -118,8 +118,6 @@ Detect-PkgMgr() {
         echo "apt"
     elif command -v dnf >/dev/null 2>&1; then
         echo "dnf"
-    elif command -v yum >/dev/null 2>&1; then
-        echo "yum"
     else
         echo "unknown"
     fi
@@ -147,11 +145,8 @@ Install-Dependencies() {
         dnf)
             dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake >/dev/null 2>&1
             ;;
-        yum)
-            yum install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconfig clang gawk cmake >/dev/null 2>&1
-            ;;
         *)
-            Stop-Script "Unsupported package manager"
+            Stop-Script "Unsupported package manager. Only apt and dnf are supported."
             ;;
     esac
     
@@ -181,9 +176,6 @@ Update-SystemPackages() {
             ;;
         dnf)
             dnf upgrade -y -q || Stop-Script "dnf upgrade failed"
-            ;;
-        yum)
-            yum update -y -q || Stop-Script "yum update failed"
             ;;
         *)
             Write-Log WARN "Unable to detect package manager"
@@ -300,7 +292,6 @@ Build-Nginx() {
         case $mgr in
             apt) apt-get install -y libssl-dev >/dev/null 2>&1 ;;
             dnf) dnf install -y openssl-devel >/dev/null 2>&1 ;;
-            yum) yum install -y openssl-devel >/dev/null 2>&1 ;;
         esac
         Write-Log INFO "Using system OpenSSL"
     fi
@@ -463,7 +454,6 @@ New-SelfSignedCertificate() {
         case $mgr in
             apt) apt-get install -y openssl >/dev/null 2>&1 ;;
             dnf) dnf install -y openssl >/dev/null 2>&1 ;;
-            yum) yum install -y openssl >/dev/null 2>&1 ;;
         esac
         ssl_bin=$(command -v openssl || true)
     fi

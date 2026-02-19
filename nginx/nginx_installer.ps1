@@ -36,20 +36,20 @@ if (-not $IsLinux) {
 # ============================================================================
 
 # NGINX
-$Script:NGINX_VERSION  = '1.29.3'
-$Script:NGINX_SHA256   = '9befcced12ee09c2f4e1385d7e8e21c91f1a5a63b196f78f897c2d044b8c9312'
+$Script:NGINX_VERSION  = '1.29.5'
+$Script:NGINX_SHA256   = '6744768a4114880f37b13a0443244e731bcb3130c0a065d7e37d8fd589ade374'
 
 # OpenSSL
-$Script:OPENSSL_VERSION = '3.6.0'
-$Script:OPENSSL_SHA256  = 'b6a5f44b7eb69e3fa35dbf15524405b44837a481d43d81daddde3ff21fcbb8e9'
+$Script:OPENSSL_VERSION = '3.6.1'
+$Script:OPENSSL_SHA256  = 'b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e'
 
 # PCRE2
 $Script:PCRE2_VERSION = '10.47'
 $Script:PCRE2_SHA256  = 'c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16'
 
 # Zlib
-$Script:ZLIB_VERSION = '1.3.1'
-$Script:ZLIB_SHA256  = '9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23'
+$Script:ZLIB_VERSION = '1.3.2'
+$Script:ZLIB_SHA256  = 'bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16'
 
 # Headers-More Module
 $Script:HEADERS_MORE_VERSION = '0.39'
@@ -60,8 +60,8 @@ $Script:ZSTD_MODULE_VERSION = '0.1.1'
 $Script:ZSTD_MODULE_SHA256  = '707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41'
 
 # ACME Module
-$Script:ACME_MODULE_VERSION = '0.3.0'
-$Script:ACME_MODULE_SHA256  = '1fa2b29d6e84e8aeffa15e91841f5a521a7537a8ce30321e56f4c1cb06d15440'
+$Script:ACME_MODULE_VERSION = '0.3.1'
+$Script:ACME_MODULE_SHA256  = 'be3d3d10f042930a3bf348731698eadb7003d224a863c53b719ccd28721572c3'
 
 # ============================================================================
 # Static Configuration
@@ -76,10 +76,10 @@ $null = New-Item -ItemType Directory -Path $Script:BUILD_DIR -Force -ErrorAction
 $null = New-Item -ItemType Directory -Path (Split-Path $Script:LOG_FILE -Parent) -Force -ErrorAction SilentlyContinue
 
 # Download URLs
-$Script:NGINX_URL        = "https://nginx.org/download/nginx-$($Script:NGINX_VERSION).tar.gz"
+$Script:NGINX_URL        = "https://github.com/nginx/nginx/releases/download/release-$($Script:NGINX_VERSION)/nginx-$($Script:NGINX_VERSION).tar.gz"
 $Script:OPENSSL_URL      = "https://github.com/openssl/openssl/releases/download/openssl-$($Script:OPENSSL_VERSION)/openssl-$($Script:OPENSSL_VERSION).tar.gz"
 $Script:PCRE2_URL        = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$($Script:PCRE2_VERSION)/pcre2-$($Script:PCRE2_VERSION).tar.gz"
-$Script:ZLIB_URL         = "https://zlib.net/zlib-$($Script:ZLIB_VERSION).tar.gz"
+$Script:ZLIB_URL         = "https://github.com/madler/zlib/releases/download/v$($Script:ZLIB_VERSION)/zlib-$($Script:ZLIB_VERSION).tar.gz"
 $Script:HEADERS_MORE_URL = "https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v$($Script:HEADERS_MORE_VERSION).tar.gz"
 $Script:ZSTD_MODULE_URL  = "https://github.com/tokers/zstd-nginx-module/archive/refs/tags/$($Script:ZSTD_MODULE_VERSION).tar.gz"
 $Script:ACME_MODULE_URL  = "https://github.com/nginx/nginx-acme/releases/download/v$($Script:ACME_MODULE_VERSION)/nginx-acme-$($Script:ACME_MODULE_VERSION).tar.gz"
@@ -149,8 +149,6 @@ function Detect-PkgMgr {
         return "apt"
     } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
         return "dnf"
-    } elseif (Get-Command yum -ErrorAction SilentlyContinue) {
-        return "yum"
     } else {
         return "unknown"
     }
@@ -185,11 +183,8 @@ function Install-Dependencies {
         'dnf' {
             & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
-        'yum' {
-            & yum install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconfig clang gawk cmake 2>&1 | Out-Null
-        }
         default {
-            Stop-Script "Unsupported package manager"
+            Stop-Script "Unsupported package manager. Only apt and dnf are supported."
         }
     }
 
@@ -224,10 +219,6 @@ function Update-SystemPackages {
         'dnf' {
             & dnf upgrade -y -q 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { Stop-Script 'dnf upgrade failed' }
-        }
-        'yum' {
-            & yum update -y -q 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Stop-Script 'yum update failed' }
         }
         default {
             Write-Log 'WARN' 'Unable to detect package manager'
@@ -361,7 +352,6 @@ function Build-Nginx {
         switch ($mgr) {
             'apt' { & apt-get install -y libssl-dev | Out-Null }
             'dnf' { & dnf install -y openssl-devel | Out-Null }
-            'yum' { & yum install -y openssl-devel | Out-Null }
         }
         Write-Log 'INFO' 'Using system OpenSSL'
     }
@@ -530,7 +520,6 @@ function New-SelfSignedCertificate {
         switch ($mgr) {
             'apt' { & apt-get install -y openssl | Out-Null }
             'dnf' { & dnf install -y openssl | Out-Null }
-            'yum' { & yum install -y openssl | Out-Null }
         }
         $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
     }
