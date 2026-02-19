@@ -266,15 +266,20 @@ Build-Nginx() {
         export TMPDIR="$BUILD_DIR"
         export CC=gcc
         
-        local output
-        if ! output=$(./Configure "$arch" \
+        local output configure_exit
+        output=$(./Configure "$arch" \
             --prefix="$(pwd)/../openssl-install" \
             --openssldir="$(pwd)/../openssl-install/ssl" \
-            enable-tls1_3 shared -fPIC 2>&1 | grep -v '^DEBUG:' | grep -v '^No value given'); then
+            enable-tls1_3 shared -fPIC 2>&1) && configure_exit=0 || configure_exit=$?
+        output=$(printf '%s\n' "$output" | grep -v '^DEBUG:' | grep -v '^No value given' || true)
+        if [[ $configure_exit -ne 0 ]]; then
             use_system_ssl=true
             Write-Log WARN "OpenSSL configure failed"
         else
-            if ! output=$(make -j"$(nproc)" 2>&1 | grep -v '^DEBUG:'); then
+            local make_exit
+            output=$(make -j"$(nproc)" 2>&1) && make_exit=0 || make_exit=$?
+            output=$(printf '%s\n' "$output" | grep -v '^DEBUG:' || true)
+            if [[ $make_exit -ne 0 ]]; then
                 use_system_ssl=true
                 Write-Log WARN "OpenSSL build failed"
             else
@@ -690,6 +695,12 @@ Test-NginxInstallation() {
         Write-Log WARN "Nginx service not active"
     fi
     
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        Write-Log INFO "Nginx service is active"
+    fi
+
+    curl -k https://localhost -I >/dev/null 2>&1 || Write-Log WARN "curl to https://localhost failed"
+
     return 0
 }
 

@@ -15,7 +15,7 @@
 #>
 
 #!/usr/bin/env pwsh
-#Requires -Version 7.0
+#Requires -Version 7.1
 
 param(
     [ValidateSet('install','remove')]
@@ -71,9 +71,15 @@ $Script:BUILD_DIR  = "/root/nginx-build-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:BACKUP_DIR = "/root/nginx-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:LOG_FILE   = "/var/log/nginx-installer-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
+
 # Ensure directories exist
 $null = New-Item -ItemType Directory -Path $Script:BUILD_DIR -Force -ErrorAction SilentlyContinue
 $null = New-Item -ItemType Directory -Path (Split-Path $Script:LOG_FILE -Parent) -Force -ErrorAction SilentlyContinue
+
+# Start transcript logging (equivalent to Bash exec > >(tee -a ...))
+if (-not (Test-Path $Script:LOG_FILE)) {
+    Start-Transcript -Path $Script:LOG_FILE -Append | Out-Null
+}
 
 # Download URLs
 $Script:NGINX_URL        = "https://github.com/nginx/nginx/releases/download/release-$($Script:NGINX_VERSION)/nginx-$($Script:NGINX_VERSION).tar.gz"
@@ -299,7 +305,7 @@ function Build-Nginx {
     $tmpSpace = (& df /tmp | Select-Object -Skip 1 | ForEach-Object {
         $_.Split([char[]]@(' ', "`t"), [System.StringSplitOptions]::RemoveEmptyEntries)[3]
     })
-    if ([int]$tmpSpace -lt 1048576) {
+    if ($tmpSpace -and [int]$tmpSpace -lt 1048576) {
         Write-Log 'WARN' "Low disk space in /tmp, using build directory"
         $env:TMPDIR = $Script:BUILD_DIR
     }
@@ -318,7 +324,35 @@ function Build-Nginx {
     if (-not $useSystemSsl) {
         Write-Log 'INFO' "Building OpenSSL $Script:OPENSSL_VERSION (Standalone)"
         Push-Location (Join-Path $Script:BUILD_DIR 'openssl')
-
+        $env:DESTDIR = Join-Path $Script:BUILD_DIR 'openssl-install'
+        $env:OPENSSL_DIR = $env:DESTDIR
+        $env:OPENSSL_NO_VENDOR = '1'
+        $env:CONFIGURE_OPTS = 'no-shared enable-ec_nistp_64_gcc_128 enable-tls1_3 enable-ktls'
+        $configOut = bash -c "./Configure linux-x86_64 $env:CONFIGURE_OPTS --prefix=$env:DESTDIR 2>&1"
+        $configExit = $LASTEXITCODE
+        if ($configExit -ne 0) {
+            Write-Log 'ERROR' "OpenSSL configure failed: $configOut"
+            Pop-Location
+            Stop-Script 'OpenSSL configure failed'
+        }
+        $makeOut = bash -c "make -j$(nproc) 2>&1"
+        $makeExit = $LASTEXITCODE
+        if ($makeExit -ne 0) {
+            Write-Log 'ERROR' "OpenSSL make failed: $makeOut"
+            Pop-Location
+            Stop-Script 'OpenSSL build failed'
+        }
+        $installOut = bash -c "make install_sw 2>&1"
+        $installExit = $LASTEXITCODE
+        if ($installExit -ne 0) {
+            Write-Log 'ERROR' "OpenSSL install failed: $installOut"
+            Pop-Location
+            Stop-Script 'OpenSSL install failed'
+        }
+        Pop-Location
+        Write-Log 'INFO' "OpenSSL built and installed to $env:DESTDIR"
+        $sslOpt = "--with-openssl=$($Script:BUILD_DIR)/openssl"
+    }
         $archConfig = switch ($arch) {
             'x86_64'  { 'linux-x86_64' }
             'aarch64' { 'linux-aarch64' }
@@ -457,7 +491,8 @@ export LDFLAGS='-lzstd'
         $acmeEnv = "export OPENSSL_DIR='$opensslInstall' && export OPENSSL_LIB_DIR='$libDir' && export OPENSSL_INCLUDE_DIR='$opensslInstall/include' && export OPENSSL_STATIC=1"
     }
 
-    $cmd = "$sourceCargo && $acmeEnv && cargo build --release 2>&1"
+    $cargoEnvPart = if ($acmeEnv) { " && $acmeEnv" } else { "" }
+    $cmd = "$sourceCargo$cargoEnvPart && cargo build --release 2>&1"
     $acmeOutput = bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "ACME build failed: $($acmeOutput | Select-Object -Last 20)"
@@ -503,7 +538,7 @@ working. Further configuration is required.</p>
     bash -c "chmod 0644 $htmlDir/*.html 2>/dev/null || true" | Out-Null
 }
 
-function New-SelfSignedCertificate {
+function New-NginxSelfSignedCertificate {
     Write-Log 'INFO' 'Generating self-signed TLS certificate'
     $sslDir = '/etc/nginx/ssl'
     New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
@@ -673,12 +708,12 @@ function Install-Nginx {
     New-Item -ItemType Directory -Force -Path '/etc/nginx/conf.d','/etc/nginx/modules','/etc/nginx/sites-available','/etc/nginx/sites-enabled','/var/log/nginx','/var/cache/nginx','/usr/share/nginx/html' | Out-Null
 
     # Install dynamic modules
-    Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination '/etc/nginx/modules/' -Force
-    Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination '/etc/nginx/modules/' -Force
+        Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination '/etc/nginx/modules/' -Force -ErrorAction SilentlyContinue
+        Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination '/etc/nginx/modules/' -Force -ErrorAction SilentlyContinue
 
     # Install configuration files
     Install-HtmlFiles
-    New-SelfSignedCertificate
+    New-NginxSelfSignedCertificate
     New-NginxConfig
 
     # Create nginx user
@@ -707,33 +742,58 @@ WantedBy=multi-user.target
     $svc | Out-File '/etc/systemd/system/nginx.service' -Encoding utf8 -Force
 
     bash -c 'systemctl daemon-reload && systemctl enable nginx && nginx -t && systemctl start nginx' 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Script 'systemctl setup failed' }
 
     Write-Log 'INFO' "Nginx $Script:NGINX_VERSION with OpenSSL $Script:OPENSSL_VERSION installed"
     Write-Log 'INFO' "Access: https://localhost"
     bash -c 'nginx -V 2>&1 | head -n1'
-    Test-NginxInstallation
+    $testResult = Test-NginxInstallation
+    if (-not $testResult) {
+        Write-Log 'WARN' 'Post-install checks detected issues'
+    }
 }
 
 function Test-NginxInstallation {
     Write-Log 'INFO' 'Running post-install checks'
-    
+    $ok = $true
+
     if (-not (Test-Path '/etc/nginx/ssl/nginx.crt')) {
         Write-Log 'ERROR' 'SSL certificates missing'
-        return
+        $ok = $false
     }
-    
+
     if (-not (Test-Path '/etc/nginx/modules/ngx_http_acme_module.so')) {
         Write-Log 'WARN' 'ACME module not found'
     } else {
         Write-Log 'INFO' 'ACME module present'
     }
 
+    $crtPresent = Test-Path '/etc/nginx/ssl/nginx.crt'
+    $keyPresent = Test-Path '/etc/nginx/ssl/nginx.key'
+    if (-not $crtPresent -or -not $keyPresent) {
+        Write-Log 'WARN' 'Self-signed certificate or key not found'
+        $ok = $false
+    } else {
+        Write-Log 'INFO' 'Self-signed certificate and key present'
+    }
+
     $t = bash -c 'nginx -t 2>&1'
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "nginx -t failed: $t"
+        $ok = $false
+    }
+
+    $svcActive = bash -c 'systemctl is-active --quiet nginx'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log 'WARN' 'Nginx service not active'
+        $ok = $false
+    } else {
+        Write-Log 'INFO' 'Nginx service is active'
     }
 
     bash -c 'curl -k https://localhost -I' 2>&1 | Out-Null
+
+    return $ok
 }
 
 function Remove-Nginx {
