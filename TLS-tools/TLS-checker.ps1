@@ -62,17 +62,17 @@ $ErrorActionPreference = 'Stop'
 
 # Configuration
 $Config = @{
-    Version = '8.17.0'
-    BaseUrl = "https://github.com/stunnel/static-curl/releases/download/8.17.0"
+    Version = '8.18.0'
+    BaseUrl = "https://github.com/stunnel/static-curl/releases/download/8.18.0"
     Checksums = @{
-        'linux-x86_64-musl'   = 'a8569cf66855aacfeff60088016d101a0dba8cbe7dafd4f686138a72b3f8d026'
-        'linux-x86_64-glibc'  = '1f08f4d82de4967ef8c077897edeb33610a94d768e3fedf3d8abe526900a83ab'
-        'linux-aarch64-musl'  = 'd47e355d3a933a5c453ca6a5afda499be5975beed44b5ce94bedea8428b0f5a5'
-        'linux-aarch64-glibc' = '3c6562544e1a21cd37e9dec7c48c7a6d9a2f64da42fde69ba79e54014b911abb'
-        'macos-x86_64'        = '8509c7092f5a913bbadff174ae0bd7e4029cd61389d2f12a89ae4ad998296bcb'
-        'macos-arm64'         = 'd07bce6b8fb6d93ca20be22d26910142ce5f2b8c643f1ee39e7a44368de61369'
-        'windows-x86_64'      = '3cbe05c6b23f99401e5cdf024e75919016bc567d44431e7d86721d77b79ec73d'
-        'windows-aarch64'     = '99b5028b5b80733e0cce0f150eb5decc70f7210f56f6f38674052f79c4d441ff'
+        'linux-x86_64-musl'   = 'e3ea8eb7b6f86930b5811cab1bfbddfaeb750ecb28f14e19c6fc95191fc2728a'
+        'linux-x86_64-glibc'  = '4beabfd2138206255eace048fe58750ed9062f0207ca898bee3adbf902be1178'
+        'linux-aarch64-musl'  = '4df5282b8ef0e336c64faa52b546272b421146d522733606ae5343b416b646b2'
+        'linux-aarch64-glibc' = '3f096ac84800c40311a0de8987aacff8da3608e6b03ffe5ed68af2cbdd0a534a'
+        'macos-x86_64'        = 'd816f40d8eb9ce7814cea011b5a904dfdcef93ee1187d86ff304ce12f4da801a'
+        'macos-arm64'         = 'ea9c946ba4479ef95daf70ab640cc8c4ab46d67ed27e32aa46564441337fd02f'
+        'windows-x86_64'      = '4c5711b860613b33221c0772cd503c6d8ce957c35e1876ffb36d13b2635d53e8'
+        'windows-aarch64'     = '99dcf3c2f5697090fe395377780e0e636016cec0bf087552ac7f96d595d2df7d'
     }
     TlsVersions = @('1.0', '1.1', '1.2', '1.3')
     HttpVersions = @('1.1', '2', '3')
