@@ -338,7 +338,12 @@ Build-Nginx() {
         --http-log-path=/var/log/nginx/access.log \
         --error-log-path=/var/log/nginx/error.log \
         --pid-path=/run/nginx.pid \
-        --lock-path=/var/lock/nginx.lock \
+        --lock-path=/run/lock/nginx.lock \
+        --http-client-body-temp-path=/var/lib/nginx/tmp/client_body \
+        --http-proxy-temp-path=/var/lib/nginx/tmp/proxy \
+        --http-fastcgi-temp-path=/var/lib/nginx/tmp/fastcgi \
+        --http-uwsgi-temp-path=/var/lib/nginx/tmp/uwsgi \
+        --http-scgi-temp-path=/var/lib/nginx/tmp/scgi \
         $ssl_opt \
         --with-pcre="$BUILD_DIR/pcre2" \
         --with-zlib="$BUILD_DIR/zlib" \
