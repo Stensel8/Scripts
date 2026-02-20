@@ -57,9 +57,17 @@ ACME_MODULE_SHA256="be3d3d10f042930a3bf348731698eadb7003d224a863c53b719ccd287215
 # Static Configuration
 # ============================================================================
 
-BUILD_DIR="/root/nginx-build-$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="/root/nginx-backup-$(date +%Y%m%d-%H%M%S)"
+BUILD_DIR="/tmp/nginx-build-$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/var/lib/nginx-backup-$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/var/log/nginx-installer-$(date +%Y%m%d-%H%M%S).log"
+
+# FHS-compliant install paths (matching what dnf/rpm would use)
+NGINX_PREFIX="/usr/share/nginx"
+case "$(uname -m)" in
+    x86_64|aarch64) NGINX_LIBDIR="/usr/lib64" ;;
+    *)              NGINX_LIBDIR="/usr/lib" ;;
+esac
+NGINX_MODULES_PATH="${NGINX_LIBDIR}/nginx/modules"
 
 # Download URLs
 NGINX_URL="https://github.com/nginx/nginx/releases/download/release-${NGINX_VERSION}/nginx-${NGINX_VERSION}.tar.gz"
@@ -232,8 +240,8 @@ Build-Nginx() {
         use_system_ssl=true
     fi
     
-    # Clean temporary files
-    rm -rf /tmp/cc* /tmp/tmp.* /tmp/nginx-build-* 2>/dev/null || true
+    # Clean compiler temp files (not the build dir itself — managed by EXIT trap)
+    rm -rf /tmp/cc* /tmp/tmp.* 2>/dev/null || true
     
     # Check disk space in /tmp
     local tmp_space
@@ -324,7 +332,7 @@ Build-Nginx() {
     local output
     if ! output=$(./configure \
         --with-compat \
-        --prefix=/usr/local/nginx \
+        --prefix="${NGINX_PREFIX}" \
         --sbin-path=/usr/sbin/nginx \
         --conf-path=/etc/nginx/nginx.conf \
         --http-log-path=/var/log/nginx/access.log \
@@ -349,7 +357,7 @@ Build-Nginx() {
         --with-stream_realip_module \
         --with-file-aio \
         --with-threads \
-        --modules-path=/etc/nginx/modules \
+        --modules-path="${NGINX_MODULES_PATH}" \
         --add-dynamic-module="$BUILD_DIR/headers-more" \
         --add-dynamic-module="$BUILD_DIR/zstd-module" \
         2>&1); then
@@ -543,23 +551,31 @@ http {
     gzip_vary on;
     gzip_proxied any;
     gzip_comp_level 6;
+    gzip_min_length 1024;
     gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
 
     # Zstd compression
     zstd on;
     zstd_comp_level 6;
+    zstd_min_length 1024;
     zstd_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
 
-    # SSL configuration
+    # SSL/TLS configuration
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
+    # TLS 1.2 ciphers — ECDSA-only (matches the ECDSA certificate generated below).
+    # TLS 1.3 ciphers are built-in and always secure; no need to list them.
+    ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256;
+    ssl_ecdh_curve X25519MLKEM768:X25519:prime256v1:secp384r1;
     ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
+    ssl_session_timeout 1d;
     ssl_session_tickets off;
+    ssl_buffer_size 4k;
 
     # QUIC configuration
     quic_retry on;
-    ssl_early_data on;
+    # 0-RTT disabled: no replay attack protection configured at application layer
+    ssl_early_data off;
 
     server {
         listen 80;
@@ -585,6 +601,12 @@ http {
         add_header Alt-Svc 'h3=":443"; ma=86400' always;
         add_header X-Protocol $server_protocol always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
 
         location / {
             root   /usr/share/nginx/html;
@@ -622,25 +644,32 @@ Install-Nginx() {
     fi
     
     # Create directories
-    mkdir -p /etc/nginx/{conf.d,modules,sites-available,sites-enabled}
-    mkdir -p /var/log/nginx /var/cache/nginx /usr/share/nginx/html
-    
+    mkdir -p /etc/nginx/{conf.d,sites-available,sites-enabled}
+    mkdir -p "${NGINX_MODULES_PATH}"
+    mkdir -p /var/log/nginx /var/cache/nginx "${NGINX_PREFIX}/html"
+    mkdir -p /var/lib/nginx/tmp/{client_body,proxy,fastcgi,uwsgi,scgi}
+
+    # Symlink /etc/nginx/modules -> real modules dir (matches Fedora/RHEL convention)
+    if [[ ! -L /etc/nginx/modules ]]; then
+        ln -sf "${NGINX_MODULES_PATH}" /etc/nginx/modules
+    fi
+
     # Install dynamic modules
-    cp objs/*.so /etc/nginx/modules/ 2>/dev/null || true
-    cp "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" /etc/nginx/modules/ 2>/dev/null || true
-    
+    cp objs/*.so "${NGINX_MODULES_PATH}/" 2>/dev/null || true
+    cp "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" "${NGINX_MODULES_PATH}/" 2>/dev/null || true
+
     # Install configuration files
     Install-HtmlFiles
     New-SelfSignedCertificate
     New-NginxConfig
-    
+
     # Create nginx user
     if ! id nginx >/dev/null 2>&1; then
         useradd -r -s /sbin/nologin nginx || true
     fi
-    
-    chown -R nginx:nginx /var/log/nginx /var/cache/nginx
-    chmod 755 /etc/nginx/{conf.d,modules}
+
+    chown -R nginx:nginx /var/log/nginx /var/cache/nginx /var/lib/nginx
+    chmod 755 /etc/nginx/conf.d "${NGINX_MODULES_PATH}"
     
     # Create systemd service
     cat > /etc/systemd/system/nginx.service <<'EOF'
@@ -667,6 +696,7 @@ EOF
     
     Write-Log INFO "Nginx ${NGINX_VERSION} with OpenSSL ${OPENSSL_VERSION} installed"
     Write-Log INFO "Access: https://localhost"
+    Write-Log INFO "Manage nginx with: systemctl {start|stop|reload|restart|status} nginx"
     nginx -V 2>&1 | head -n1 || true
     
     Test-NginxInstallation || Write-Log WARN "Post-install checks detected issues"
@@ -706,23 +736,40 @@ Test-NginxInstallation() {
 
 Remove-Nginx() {
     Write-Log INFO "Removing Nginx"
-    
+
     systemctl stop nginx 2>/dev/null || true
-    rm -rf /usr/sbin/nginx /etc/nginx /var/log/nginx /var/cache/nginx
+    systemctl disable nginx 2>/dev/null || true
+    rm -f /etc/systemd/system/nginx.service
+    systemctl daemon-reload 2>/dev/null || true
+
+    rm -rf \
+        /usr/sbin/nginx \
+        /etc/nginx \
+        /var/log/nginx \
+        /var/cache/nginx \
+        /var/lib/nginx \
+        "${NGINX_PREFIX}" \
+        "${NGINX_LIBDIR}/nginx"
     userdel nginx 2>/dev/null || true
-    
+
     Write-Log INFO "Nginx removed"
 }
 
 Test-RunningWebServers() {
-    local port443
-    port443=$(lsof -ti :443 2>/dev/null | head -n1 || true)
-    
-    if [[ -n "$port443" ]]; then
-        local proc
-        proc=$(ps -p "$port443" -o comm= 2>/dev/null || true)
-        Write-Log WARN "Port 443 in use by: $proc"
-        
+    local ports_in_use=()
+
+    for port in 80 443; do
+        local pid
+        pid=$(lsof -ti :"$port" 2>/dev/null | head -n1 || true)
+        if [[ -n "$pid" ]]; then
+            local proc
+            proc=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+            ports_in_use+=("$port ($proc)")
+            Write-Log WARN "Port $port in use by: $proc"
+        fi
+    done
+
+    if [[ ${#ports_in_use[@]} -gt 0 ]]; then
         read -r -p "Stop conflicting services? [y/N]: " response
         if [[ "$response" =~ ^[Yy]$ ]]; then
             systemctl stop apache2 2>/dev/null || true
@@ -730,7 +777,7 @@ Test-RunningWebServers() {
             systemctl stop nginx 2>/dev/null || true
             Write-Log INFO "Services stopped"
         else
-            Stop-Script "Cannot proceed with port 443 in use"
+            Stop-Script "Cannot proceed with ports in use: ${ports_in_use[*]}"
         fi
     fi
 }
