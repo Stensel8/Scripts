@@ -93,6 +93,19 @@ jobs:
           steps.pcre2.outputs.update_needed == 'true' ||
           steps.zlib.outputs.update_needed == 'true'
         uses: actions/github-script@v7
+        env:
+          NGINX_UPDATE_NEEDED: ${{ steps.nginx.outputs.update_needed }}
+          NGINX_CURRENT: ${{ steps.nginx.outputs.current }}
+          NGINX_LATEST: ${{ steps.nginx.outputs.latest }}
+          OPENSSL_UPDATE_NEEDED: ${{ steps.openssl.outputs.update_needed }}
+          OPENSSL_CURRENT: ${{ steps.openssl.outputs.current }}
+          OPENSSL_LATEST: ${{ steps.openssl.outputs.latest }}
+          PCRE2_UPDATE_NEEDED: ${{ steps.pcre2.outputs.update_needed }}
+          PCRE2_CURRENT: ${{ steps.pcre2.outputs.current }}
+          PCRE2_LATEST: ${{ steps.pcre2.outputs.latest }}
+          ZLIB_UPDATE_NEEDED: ${{ steps.zlib.outputs.update_needed }}
+          ZLIB_CURRENT: ${{ steps.zlib.outputs.current }}
+          ZLIB_LATEST: ${{ steps.zlib.outputs.latest }}
         with:
           script: |
             const issueTitle = '🔄 NGINX Dependencies Update Available';
@@ -100,10 +113,10 @@ jobs:
 
             The following dependencies have updates available:
 
-            ${steps.nginx.outputs.update_needed === 'true' ? `- **NGINX**: ${steps.nginx.outputs.current} → ${steps.nginx.outputs.latest}` : ''}
-            ${steps.openssl.outputs.update_needed === 'true' ? `- **OpenSSL**: ${steps.openssl.outputs.current} → ${steps.openssl.outputs.latest}` : ''}
-            ${steps.pcre2.outputs.update_needed === 'true' ? `- **PCRE2**: ${steps.pcre2.outputs.current} → ${steps.pcre2.outputs.latest}` : ''}
-            ${steps.zlib.outputs.update_needed === 'true' ? `- **Zlib**: ${steps.zlib.outputs.current} → ${steps.zlib.outputs.latest}` : ''}
+            ${process.env.NGINX_UPDATE_NEEDED === 'true' ? `- **NGINX**: ${process.env.NGINX_CURRENT} → ${process.env.NGINX_LATEST}` : ''}
+            ${process.env.OPENSSL_UPDATE_NEEDED === 'true' ? `- **OpenSSL**: ${process.env.OPENSSL_CURRENT} → ${process.env.OPENSSL_LATEST}` : ''}
+            ${process.env.PCRE2_UPDATE_NEEDED === 'true' ? `- **PCRE2**: ${process.env.PCRE2_CURRENT} → ${process.env.PCRE2_LATEST}` : ''}
+            ${process.env.ZLIB_UPDATE_NEEDED === 'true' ? `- **Zlib**: ${process.env.ZLIB_CURRENT} → ${process.env.ZLIB_LATEST}` : ''}
 
             ### Files to update:
             - \`nginx/nginx_installer.sh\`
@@ -149,8 +162,6 @@ jobs:
               });
               console.log('Created new issue');
             }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   check-ansible-deps:
     name: Check Ansible Dependencies
@@ -196,6 +207,13 @@ jobs:
           steps.python.outputs.update_needed == 'true' ||
           steps.ansible.outputs.update_needed == 'true'
         uses: actions/github-script@v7
+        env:
+          PYTHON_UPDATE_NEEDED: ${{ steps.python.outputs.update_needed }}
+          PYTHON_CURRENT: ${{ steps.python.outputs.current }}
+          PYTHON_LATEST: ${{ steps.python.outputs.latest }}
+          ANSIBLE_UPDATE_NEEDED: ${{ steps.ansible.outputs.update_needed }}
+          ANSIBLE_CURRENT: ${{ steps.ansible.outputs.current }}
+          ANSIBLE_LATEST: ${{ steps.ansible.outputs.latest }}
         with:
           script: |
             const issueTitle = '🔄 Ansible Dependencies Update Available';
@@ -203,8 +221,8 @@ jobs:
 
             The following dependencies have updates available:
 
-            ${steps.python.outputs.update_needed === 'true' ? `- **Python**: ${steps.python.outputs.current} → ${steps.python.outputs.latest}` : ''}
-            ${steps.ansible.outputs.update_needed === 'true' ? `- **Ansible**: ${steps.ansible.outputs.current} → ${steps.ansible.outputs.latest}` : ''}
+            ${process.env.PYTHON_UPDATE_NEEDED === 'true' ? `- **Python**: ${process.env.PYTHON_CURRENT} → ${process.env.PYTHON_LATEST}` : ''}
+            ${process.env.ANSIBLE_UPDATE_NEEDED === 'true' ? `- **Ansible**: ${process.env.ANSIBLE_CURRENT} → ${process.env.ANSIBLE_LATEST}` : ''}
 
             ### Files to update:
             - \`ansible/ansible_installer.sh\`
@@ -246,8 +264,6 @@ jobs:
               });
               console.log('Created new issue');
             }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   check-docker:
     name: Check Docker Installation
