@@ -1,0 +1,154 @@
+name: Validate Installer Scripts
+
+# This workflow validates the syntax and basic structure of installer scripts
+# to catch issues early before they're deployed to production systems
+
+on:
+  pull_request:
+    paths:
+      - '**/*.sh'
+      - '**/*.ps1'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.sh'
+      - '**/*.ps1'
+  workflow_dispatch:
+
+jobs:
+  validate-bash-scripts:
+    name: Validate Bash Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Find all bash scripts
+        id: find-scripts
+        run: |
+          # Find all .sh files, excluding third-party directories
+          find . -type f -name "*.sh" ! -path "./TLS-tools/testssl.sh-*" > bash_scripts.txt
+          cat bash_scripts.txt
+
+      - name: Validate bash syntax
+        run: |
+          echo "### Bash Syntax Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          failed=0
+          while IFS= read -r script; do
+            echo "Checking: $script"
+            if bash -n "$script"; then
+              echo "✅ $script - OK" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $script - FAILED" >> $GITHUB_STEP_SUMMARY
+              failed=1
+            fi
+          done < bash_scripts.txt
+
+          exit $failed
+
+      - name: Run ShellCheck
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ShellCheck Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          while IFS= read -r script; do
+            echo "ShellCheck: $script"
+            # Run shellcheck with moderate severity (ignore style issues)
+            if shellcheck -S warning "$script"; then
+              echo "✅ $script - No warnings" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ $script - Has warnings (non-blocking)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done < bash_scripts.txt
+
+      - name: Check for hardcoded credentials
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Look for potential hardcoded passwords or API keys
+          if grep -rn -E '(password|apikey|api_key|secret|token).*=.*["\x27][^"\x27]{8,}["\x27]' \
+            --include="*.sh" \
+            --exclude-dir="TLS-tools" \
+            . ; then
+            echo "⚠️ Potential hardcoded credentials found (please review)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No obvious hardcoded credentials detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  validate-powershell-scripts:
+    name: Validate PowerShell Scripts
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find all PowerShell scripts
+        id: find-scripts
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path . -Filter "*.ps1" -Recurse |
+            Select-Object -ExpandProperty FullName |
+            Out-File -FilePath powershell_scripts.txt
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+
+          "### PowerShell Syntax Validation" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+          Get-Content powershell_scripts.txt | ForEach-Object {
+            $script = $_
+            Write-Host "Checking: $script"
+
+            $errors = $null
+            $null = [System.Management.Automation.PSParser]::Tokenize(
+              (Get-Content $script -Raw), [ref]$errors
+            )
+
+            if ($errors.Count -eq 0) {
+              "✅ $script - OK" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            } else {
+              "❌ $script - FAILED" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            exit 1
+          }
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "### PSScriptAnalyzer Analysis" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+          Get-Content powershell_scripts.txt | ForEach-Object {
+            $script = $_
+            Write-Host "Analyzing: $script"
+
+            $results = Invoke-ScriptAnalyzer -Path $script -Severity Warning,Error
+
+            if ($results.Count -eq 0) {
+              "✅ $script - No issues" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            } else {
+              "⚠️ $script - $($results.Count) issue(s) found (non-blocking)" |
+                Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }

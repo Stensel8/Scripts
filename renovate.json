@@ -1,0 +1,63 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base"
+  ],
+  "description": "Renovate configuration for Scripts repository - Alternative to Dependabot",
+  "enabled": false,
+  "enabledManagers": [
+    "github-actions",
+    "dockerfile",
+    "docker-compose"
+  ],
+  "schedule": [
+    "every weekend"
+  ],
+  "labels": [
+    "dependencies",
+    "renovate"
+  ],
+  "assignees": [
+    "Stensel8"
+  ],
+  "reviewers": [
+    "Stensel8"
+  ],
+  "prConcurrentLimit": 5,
+  "prCreation": "immediate",
+  "prHourlyLimit": 0,
+  "rebaseWhen": "behind-base-branch",
+  "semanticCommits": "enabled",
+  "commitMessagePrefix": "deps:",
+  "commitMessageAction": "update",
+  "commitMessageTopic": "{{depName}}",
+  "packageRules": [
+    {
+      "description": "GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": false,
+      "semanticCommitType": "ci",
+      "commitMessagePrefix": "ci:",
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Docker image updates",
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ],
+      "automerge": false,
+      "semanticCommitType": "deps",
+      "commitMessagePrefix": "deps:",
+      "groupName": "Docker"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ]
+  }
+}
