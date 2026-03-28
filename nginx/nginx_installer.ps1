@@ -36,8 +36,8 @@ if (-not $IsLinux) {
 # ============================================================================
 
 # NGINX
-$Script:NGINX_VERSION = '1.29.5'
-$Script:NGINX_SHA256  = '6744768a4114880f37b13a0443244e731bcb3130c0a065d7e37d8fd589ade374'
+$Script:NGINX_VERSION = '1.28.3'
+$Script:NGINX_SHA256  = '2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918'
 
 # OpenSSL
 $Script:OPENSSL_VERSION = '3.6.1'
