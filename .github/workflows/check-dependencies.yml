@@ -92,7 +92,7 @@ jobs:
           steps.openssl.outputs.update_needed == 'true' ||
           steps.pcre2.outputs.update_needed == 'true' ||
           steps.zlib.outputs.update_needed == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const issueTitle = '🔄 NGINX Dependencies Update Available';
@@ -195,7 +195,7 @@ jobs:
         if: |
           steps.python.outputs.update_needed == 'true' ||
           steps.ansible.outputs.update_needed == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const issueTitle = '🔄 Ansible Dependencies Update Available';
