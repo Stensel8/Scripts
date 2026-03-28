@@ -51,18 +51,30 @@ A GitHub Actions workflow runs weekly (every Monday at 9:00 AM UTC) to check for
 - Python (built from source)
 - Ansible (from PyPI)
 
+**Kubernetes Installer:**
+- Kubernetes (kubectl) version
+- Minikube (uses latest release)
+
 **Other Installers:**
 - Docker (uses official repositories)
-- Kubernetes (kubectl)
-- Terraform
-- Podman
-- OpenSSH
+- Terraform (uses HashiCorp repositories)
+- Podman (uses distribution repositories)
+- OpenSSH (uses distribution repositories)
 
-When new versions are detected, the workflow automatically creates or updates GitHub issues with:
-- Current vs. latest version comparison
-- Files that need updating
-- Step-by-step update instructions
-- SHA256 checksum update reminders
+When new versions are detected, the workflow automatically:
+1. Creates or updates GitHub issues with:
+   - Current vs. latest version comparison
+   - Files that need updating
+   - Step-by-step update instructions
+   - SHA256 checksum update reminders (where applicable)
+
+2. Triggers the Auto-Update Bot to:
+   - Create a draft Pull Request linked to the issue
+   - Set up the branch for the update
+   - Provide detailed instructions for completing the update
+   - Auto-link the issue and PR together
+
+This automated system ensures you're always notified of available updates and provides a streamlined workflow to apply them.
 
 ### Script Validation
 All installer scripts are automatically validated on every push and pull request:

@@ -1,0 +1,233 @@
+name: Auto-Update Dependencies
+
+# This workflow automatically creates Pull Requests to update dependencies
+# when dependency update issues are created or updated
+
+on:
+  issues:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to process'
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  auto-update:
+    name: Auto-Update Dependencies
+    runs-on: ubuntu-latest
+    # Only run for dependency update issues
+    if: |
+      (github.event_name == 'workflow_dispatch') ||
+      (contains(github.event.issue.labels.*.name, 'dependencies') &&
+       contains(github.event.issue.title, 'Update Available'))
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Parse issue and create PR
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const issueNumber = context.payload.issue?.number || ${{ github.event.inputs.issue_number }};
+
+            // Get the issue details
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            console.log(`Processing issue #${issueNumber}: ${issue.data.title}`);
+
+            // Extract version information from issue body
+            const body = issue.data.body;
+            const labels = issue.data.labels.map(l => l.name);
+
+            // Determine which type of dependency update this is
+            let updateType = '';
+            let branchName = '';
+            let files = [];
+
+            if (labels.includes('nginx')) {
+              updateType = 'NGINX';
+              branchName = `update-nginx-deps-${Date.now()}`;
+              files = ['nginx/nginx_installer.sh', 'nginx/nginx_installer.ps1'];
+            } else if (labels.includes('ansible')) {
+              updateType = 'Ansible';
+              branchName = `update-ansible-deps-${Date.now()}`;
+              files = ['ansible/ansible_installer.sh'];
+            } else if (labels.includes('kubernetes')) {
+              updateType = 'Kubernetes';
+              branchName = `update-kubernetes-deps-${Date.now()}`;
+              files = ['kubernetes/kubernetes_installer.sh'];
+            } else {
+              console.log('Unknown dependency type, skipping PR creation');
+              return;
+            }
+
+            console.log(`Update type: ${updateType}`);
+            console.log(`Branch name: ${branchName}`);
+
+            // Check if a PR already exists for this issue
+            const existingPRs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branchName.split('-').slice(0, -1).join('-')}`
+            });
+
+            // Search for any PR that references this issue
+            const allPRs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open'
+            });
+
+            const linkedPR = allPRs.data.find(pr =>
+              pr.body && pr.body.includes(`#${issueNumber}`)
+            );
+
+            if (linkedPR) {
+              console.log(`PR #${linkedPR.number} already exists for this issue`);
+
+              // Add comment to issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `A pull request already exists to address this update: #${linkedPR.number}`
+              });
+
+              return;
+            }
+
+            // Create a new branch
+            const mainBranch = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: context.payload.repository.default_branch
+            });
+
+            try {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/heads/${branchName}`,
+                sha: mainBranch.data.commit.sha
+              });
+              console.log(`Created branch ${branchName}`);
+            } catch (error) {
+              if (error.status === 422) {
+                console.log('Branch already exists, using existing branch');
+              } else {
+                throw error;
+              }
+            }
+
+            // Create PR body with instructions and link to issue
+            const prBody = `## Automated Dependency Update
+
+This PR addresses the dependency updates identified in issue #${issueNumber}.
+
+### Changes Required
+
+The following files need to be updated:
+${files.map(f => `- [ ] \`${f}\``).join('\n')}
+
+### Update Information
+
+Please refer to issue #${issueNumber} for:
+- Current vs. latest version comparison
+- Download URLs and checksums (if applicable)
+- Testing instructions
+
+### Manual Steps Required
+
+This PR creates the branch and structure. To complete the update:
+
+1. Check out this branch:
+   \`\`\`bash
+   git checkout ${branchName}
+   \`\`\`
+
+2. Update the version numbers in the affected files according to issue #${issueNumber}
+
+3. For NGINX updates: Download new tarballs and update SHA256 checksums
+
+4. Test the installation on a clean system
+
+5. Commit and push your changes:
+   \`\`\`bash
+   git add ${files.join(' ')}
+   git commit -m "Update ${updateType} dependencies"
+   git push
+   \`\`\`
+
+### Verification
+
+- [ ] Version numbers updated in all files
+- [ ] SHA256 checksums updated (if applicable)
+- [ ] Installation tested on clean system
+- [ ] All tests pass
+
+---
+*This PR was automatically created by the auto-update workflow.*
+*Related issue: #${issueNumber}*
+
+Closes #${issueNumber}
+`;
+
+            // Create the pull request
+            try {
+              const pr = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔄 Update ${updateType} Dependencies`,
+                head: branchName,
+                base: context.payload.repository.default_branch,
+                body: prBody,
+                draft: true
+              });
+
+              console.log(`Created PR #${pr.data.number}`);
+
+              // Add labels to PR
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.data.number,
+                labels: ['dependencies', 'automated', ...labels.filter(l => l !== 'enhancement')]
+              });
+
+              // Add comment to original issue with PR link
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `🤖 **Automated PR Created**\n\nA pull request has been created to address this update: #${pr.data.number}\n\nPlease review the PR for instructions on completing the update.`
+              });
+
+              console.log(`Successfully created PR and linked to issue #${issueNumber}`);
+
+            } catch (error) {
+              console.error('Error creating PR:', error);
+
+              // Comment on issue about the error
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `⚠️ **Automated PR Creation Failed**\n\nThere was an error creating the automated pull request. Error: ${error.message}\n\nPlease create a pull request manually to address this update.`
+              });
+
+              throw error;
+            }
