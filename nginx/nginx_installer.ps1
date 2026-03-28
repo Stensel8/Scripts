@@ -223,8 +223,9 @@ function Update-SystemPackages {
             if ($LASTEXITCODE -ne 0) { Stop-Script 'apt-get upgrade failed' }
         }
         'dnf' {
-            & dnf upgrade -y -q 2>&1 | Out-Null
+            $dnfOutput = & dnf upgrade -y -q 2>&1 | Select-String -Pattern '(Complete|Error|Failed)'
             if ($LASTEXITCODE -ne 0) { Stop-Script 'dnf upgrade failed' }
+            if ($dnfOutput) { $dnfOutput | Out-Host }
         }
         default {
             Write-Log 'WARN' 'Unable to detect package manager'
@@ -502,12 +503,12 @@ function Install-HtmlFiles {
 
     $indexContent = @'
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Welcome to nginx!</title>
-<style>
-    body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <h1>Welcome to nginx!</h1>
@@ -516,8 +517,18 @@ working. Further configuration is required.</p>
 </body>
 </html>
 '@
+
+    $styleContent = @'
+body {
+    width: 35em;
+    margin: 0 auto;
+    font-family: Tahoma, Verdana, Arial, sans-serif;
+}
+'@
+
     $indexContent | Out-File (Join-Path $htmlDir 'index.html') -Encoding utf8 -Force
-    bash -c "chmod 0644 $htmlDir/*.html 2>/dev/null || true" | Out-Null
+    $styleContent | Out-File (Join-Path $htmlDir 'style.css') -Encoding utf8 -Force
+    bash -c "chmod 0644 $htmlDir/*.html $htmlDir/*.css 2>/dev/null || true" | Out-Null
 }
 
 function New-NginxSelfSignedCertificate {
