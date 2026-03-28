@@ -170,12 +170,12 @@ Install-Dependencies() {
 
 Update-SystemPackages() {
     [[ $EUID -eq 0 ]] || Stop-Script "Run as root"
-    
+
     Write-Log INFO "Updating system packages"
-    
+
     local mgr
     mgr=$(Detect-PkgMgr)
-    
+
     case $mgr in
         apt)
             export DEBIAN_FRONTEND=noninteractive
@@ -183,13 +183,16 @@ Update-SystemPackages() {
             apt-get upgrade -y -q || Stop-Script "apt-get upgrade failed"
             ;;
         dnf)
-            dnf upgrade -y -q || Stop-Script "dnf upgrade failed"
+            dnf upgrade -y -q 2>&1 | grep -E '(Complete|Error|Failed)' || true
+            if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+                Stop-Script "dnf upgrade failed"
+            fi
             ;;
         *)
             Write-Log WARN "Unable to detect package manager"
             ;;
     esac
-    
+
     Write-Log INFO "System packages updated"
 }
 
@@ -432,15 +435,15 @@ Build-Nginx() {
 Install-HtmlFiles() {
     Write-Log INFO "Installing HTML files"
     mkdir -p /usr/share/nginx/html
-    
+
     cat > /usr/share/nginx/html/index.html <<'EOF'
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Welcome to nginx!</title>
-<style>
-    body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <h1>Welcome to nginx!</h1>
@@ -449,8 +452,16 @@ working. Further configuration is required.</p>
 </body>
 </html>
 EOF
-    
-    chmod 0644 /usr/share/nginx/html/*.html 2>/dev/null || true
+
+    cat > /usr/share/nginx/html/style.css <<'EOF'
+body {
+    width: 35em;
+    margin: 0 auto;
+    font-family: Tahoma, Verdana, Arial, sans-serif;
+}
+EOF
+
+    chmod 0644 /usr/share/nginx/html/*.html /usr/share/nginx/html/*.css 2>/dev/null || true
 }
 
 New-SelfSignedCertificate() {
