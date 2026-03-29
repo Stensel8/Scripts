@@ -232,13 +232,7 @@ jobs:
               return;
             }
 
-            // Create a new branch
-            const mainBranch = await github.rest.repos.getBranch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: context.payload.repository.default_branch
-            });
-
+            // Create a new branch from the currently checked-out default branch
             try {
               execSync(`git checkout -b ${branchName}`, { stdio: 'inherit' });
               console.log(`Created branch ${branchName}`);

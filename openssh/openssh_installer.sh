@@ -167,8 +167,6 @@ configure_ssh() {
 # -----------------------------------------------------------------------------
 Port 22
 AddressFamily any
-ListenAddress 0.0.0.0
-ListenAddress ::
 
 # -----------------------------------------------------------------------------
 # Host Keys — Ed25519 only
@@ -268,7 +266,7 @@ LogLevel VERBOSE
 # -----------------------------------------------------------------------------
 EOF
 
-    # Append sftp subsystem (can't use single-quote heredoc for variable)
+    # Append sftp subsystem line
     echo "Subsystem sftp internal-sftp -f AUTHPRIV -l INFO" >> "$tmp_config"
 
     chmod 644 "$tmp_config"
@@ -336,8 +334,16 @@ show_summary() {
     echo
     echo -e "${BOLD}Next steps${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local ip_hint="host"
+    if command -v hostname >/dev/null 2>&1; then
+        ip_hint=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    if [[ -z "${ip_hint}" ]] && command -v ip >/dev/null 2>&1; then
+        ip_hint=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+    fi
+    [[ -z "${ip_hint}" ]] && ip_hint="host"
     echo -e "1. Add your public key:  ${BLUE}ssh-copy-id user@host${NC}"
-    echo -e "2. Test login:           ${BLUE}ssh user@$(hostname -I | awk '{print $1}')${NC}"
+    echo -e "2. Test login:           ${BLUE}ssh user@${ip_hint}${NC}"
     echo -e "3. Store key in:         ${BLUE}Bitwarden SSH Agent${NC}"
     echo -e "4. On Fedora/RHEL:       ${BLUE}sudo update-crypto-policies --set FUTURE${NC}"
     echo
@@ -395,11 +401,21 @@ remove() {
     systemctl is-enabled --quiet "$SSH_SERVICE" && systemctl disable "$SSH_SERVICE" || true
     [ -f "$ORIGINAL_CONFIG" ] && cp "$ORIGINAL_CONFIG" "$CONFIG_FILE" && log_info "Original config restored"
 
-    command -v apt-get &>/dev/null && apt-get remove -y openssh-server &>/dev/null || true
-    command -v dnf     &>/dev/null && dnf remove -y openssh-server &>/dev/null || true
-    command -v yum     &>/dev/null && yum remove -y openssh-server &>/dev/null || true
+    local remove_failed=0
+    if command -v apt-get &>/dev/null; then
+        apt-get remove -y openssh-server &>/dev/null || { log_error "apt-get remove failed"; remove_failed=1; }
+    elif command -v dnf &>/dev/null; then
+        dnf remove -y openssh-server &>/dev/null || { log_error "dnf remove failed"; remove_failed=1; }
+    elif command -v yum &>/dev/null; then
+        yum remove -y openssh-server &>/dev/null || { log_error "yum remove failed"; remove_failed=1; }
+    fi
 
-    log_success "OpenSSH removed. Backup: $BACKUP_DIR"
+    if [ "$remove_failed" -eq 0 ]; then
+        log_success "OpenSSH removed. Backup: $BACKUP_DIR"
+    else
+        log_warn "OpenSSH removal encountered errors. Backup: $BACKUP_DIR"
+        return 1
+    fi
 }
 
 verify() {
