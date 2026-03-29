@@ -132,11 +132,11 @@ generate_host_keys() {
 configure_ssh() {
     log_step "Writing hardened SSH configuration"
 
-    local sftp_path="/usr/lib/openssh/sftp-server"
-    [ -f "/usr/libexec/sftp-server" ]       && sftp_path="/usr/libexec/sftp-server"
-    [ -f "/usr/libexec/openssh/sftp-server" ] && sftp_path="/usr/libexec/openssh/sftp-server"
+    # Write new configuration to a temporary file first, so we can validate it
+    local tmp_config
+    tmp_config="$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")"
 
-    cat > "$CONFIG_FILE" << 'EOF'
+    cat > "$tmp_config" << 'EOF'
 # =============================================================================
 # Hardened OpenSSH Server Configuration
 # Ed25519-only · No password auth · FUTURE crypto policy compatible
@@ -268,10 +268,23 @@ LogLevel VERBOSE
 # -----------------------------------------------------------------------------
 EOF
 
-    # Append sftp path (can't use single-quote heredoc for variable)
-    echo "Subsystem sftp internal-sftp -f AUTHPRIV -l INFO" >> "$CONFIG_FILE"
+    # Append sftp subsystem (can't use single-quote heredoc for variable)
+    echo "Subsystem sftp internal-sftp -f AUTHPRIV -l INFO" >> "$tmp_config"
 
-    chmod 644 "$CONFIG_FILE"
+    chmod 644 "$tmp_config"
+
+    # Validate the new config before replacing the live one
+    local validation_output
+    if ! validation_output=$(sshd -t -f "$tmp_config" 2>&1); then
+        log_error "New configuration failed validation; original config left intact"
+        echo "$validation_output" >&2
+        rm -f "$tmp_config"
+        return 1
+    fi
+
+    # Atomically replace the live config
+    mv -f "$tmp_config" "$CONFIG_FILE"
+
     mkdir -p /run/sshd
     chmod 755 /run/sshd
 
@@ -406,8 +419,32 @@ verify() {
     for key in /etc/ssh/ssh_host_*_key; do
         [ -f "$key" ] && log_success "Host key: $(ssh-keygen -lf "$key" 2>/dev/null)"
     done
+    if [ ! -f "/etc/ssh/ssh_host_ed25519_key" ]; then
+        log_error "Ed25519 host key not found"
+        ((issues++))
+    fi
 
-    ss -tlnp | grep -q :22 && log_success "Listening on :22" || log_warn "Not listening on :22"
+    if command -v ss &>/dev/null; then
+        if ss -tlnp | grep -q :22; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    elif command -v netstat &>/dev/null; then
+        if netstat -tlnp 2>/dev/null | grep -q ':22'; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    elif command -v lsof &>/dev/null; then
+        if lsof -iTCP:22 -sTCP:LISTEN -nP &>/dev/null; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    else
+        log_warn "Cannot verify listening port :22 (no ss/netstat/lsof available)"
+    fi
 
     [ $issues -eq 0 ] && log_success "Verification passed" || { log_error "$issues issue(s) found"; return 1; }
 }

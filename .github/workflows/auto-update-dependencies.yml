@@ -22,11 +22,19 @@ jobs:
   auto-update:
     name: Auto-Update Dependencies
     runs-on: ubuntu-latest
-    # Only run for dependency update issues
+    # Only run for dependency update issues from trusted actors
     if: |
       (github.event_name == 'workflow_dispatch') ||
-      (contains(github.event.issue.labels.*.name, 'dependencies') &&
-       contains(github.event.issue.title, 'Update Available'))
+      (
+        contains(github.event.issue.labels.*.name, 'dependencies') &&
+        contains(github.event.issue.title, 'Update Available') &&
+        (
+          github.event.issue.user.login == 'github-actions[bot]' ||
+          github.event.issue.author_association == 'OWNER' ||
+          github.event.issue.author_association == 'MEMBER' ||
+          github.event.issue.author_association == 'COLLABORATOR'
+        )
+      )
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -40,12 +48,15 @@ jobs:
 
       - name: Parse issue and update dependencies
         uses: actions/github-script@v8
+        env:
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
         with:
           script: |
             const fs = require('fs');
             const { execSync } = require('child_process');
 
-            const issueNumber = context.payload.issue?.number || ${{ github.event.inputs.issue_number }};
+            const issueNumberInput = process.env.ISSUE_NUMBER;
+            const issueNumber = context.payload.issue?.number || (issueNumberInput ? parseInt(issueNumberInput, 10) : undefined);
 
             // Get the issue details
             const issue = await github.rest.issues.get({
