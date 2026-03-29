@@ -62,7 +62,7 @@ jobs:
         id: pcre2
         run: |
           CURRENT_VERSION=$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)
-          echo "current=$CURRENT_OUTPUT" >> $GITHUB_OUTPUT
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
           # Get latest version from GitHub releases
           LATEST_VERSION=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/PCRE2Project/pcre2/releases/latest | jq -r '.tag_name' | sed 's/pcre2-//')

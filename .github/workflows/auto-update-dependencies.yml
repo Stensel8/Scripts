@@ -1,7 +1,7 @@
 name: Auto-Update Dependencies
 
-# This workflow automatically creates Pull Requests to update dependencies
-# when dependency update issues are created or updated
+# This workflow automatically creates Pull Requests with actual code changes
+# to update dependencies when dependency update issues are created
 
 on:
   issues:
@@ -33,10 +33,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Parse issue and create PR
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Parse issue and update dependencies
         uses: actions/github-script@v8
         with:
           script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
             const issueNumber = context.payload.issue?.number || ${{ github.event.inputs.issue_number }};
 
             // Get the issue details
@@ -48,42 +56,8 @@ jobs:
 
             console.log(`Processing issue #${issueNumber}: ${issue.data.title}`);
 
-            // Extract version information from issue body
             const body = issue.data.body;
             const labels = issue.data.labels.map(l => l.name);
-
-            // Determine which type of dependency update this is
-            let updateType = '';
-            let branchName = '';
-            let files = [];
-
-            if (labels.includes('nginx')) {
-              updateType = 'NGINX';
-              branchName = `update-nginx-deps-${Date.now()}`;
-              files = ['nginx/nginx_installer.sh', 'nginx/nginx_installer.ps1'];
-            } else if (labels.includes('ansible')) {
-              updateType = 'Ansible';
-              branchName = `update-ansible-deps-${Date.now()}`;
-              files = ['ansible/ansible_installer.sh'];
-            } else if (labels.includes('kubernetes')) {
-              updateType = 'Kubernetes';
-              branchName = `update-kubernetes-deps-${Date.now()}`;
-              files = ['kubernetes/kubernetes_installer.sh'];
-            } else {
-              console.log('Unknown dependency type, skipping PR creation');
-              return;
-            }
-
-            console.log(`Update type: ${updateType}`);
-            console.log(`Branch name: ${branchName}`);
-
-            // Check if a PR already exists for this issue
-            const existingPRs = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              head: `${context.repo.owner}:${branchName.split('-').slice(0, -1).join('-')}`
-            });
 
             // Search for any PR that references this issue
             const allPRs = await github.rest.pulls.list({
@@ -98,15 +72,152 @@ jobs:
 
             if (linkedPR) {
               console.log(`PR #${linkedPR.number} already exists for this issue`);
-
-              // Add comment to issue
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
                 body: `A pull request already exists to address this update: #${linkedPR.number}`
               });
+              return;
+            }
 
+            // Extract version information from issue body
+            const versionRegex = /\*\*([^:]+)\*\*:\s+([^\s]+)\s+→\s+([^\s]+)/g;
+            const updates = {};
+            let match;
+
+            while ((match = versionRegex.exec(body)) !== null) {
+              const [, component, currentVersion, latestVersion] = match;
+              updates[component.trim()] = {
+                current: currentVersion.trim(),
+                latest: latestVersion.trim()
+              };
+            }
+
+            console.log('Extracted updates:', JSON.stringify(updates, null, 2));
+
+            // Determine update type and files to modify
+            let updateType = '';
+            let branchName = '';
+            let files = [];
+            let updatesMade = false;
+
+            if (labels.includes('ansible')) {
+              updateType = 'Ansible';
+              branchName = `automated-update/ansible-${Date.now()}`;
+
+              // Update Ansible installer
+              const ansibleFile = 'ansible/ansible_installer.sh';
+              let content = fs.readFileSync(ansibleFile, 'utf8');
+              let modified = false;
+
+              if (updates['Python']) {
+                const pythonRegex = /BUILD_PYTHON_VERSION:-([0-9.]+)/;
+                content = content.replace(pythonRegex, `BUILD_PYTHON_VERSION:-${updates['Python'].latest}`);
+                modified = true;
+                console.log(`Updated Python version to ${updates['Python'].latest}`);
+              }
+
+              if (updates['Ansible']) {
+                const ansibleRegex = /pip install ansible==([0-9.]+)/;
+                content = content.replace(ansibleRegex, `pip install ansible==${updates['Ansible'].latest}`);
+                modified = true;
+                console.log(`Updated Ansible version to ${updates['Ansible'].latest}`);
+              }
+
+              if (modified) {
+                fs.writeFileSync(ansibleFile, content);
+                files.push(ansibleFile);
+                updatesMade = true;
+              }
+
+            } else if (labels.includes('nginx')) {
+              updateType = 'NGINX';
+              branchName = `automated-update/nginx-${Date.now()}`;
+
+              // Update NGINX installer (Bash)
+              const nginxShFile = 'nginx/nginx_installer.sh';
+              let shContent = fs.readFileSync(nginxShFile, 'utf8');
+              let shModified = false;
+
+              // Update NGINX installer (PowerShell)
+              const nginxPs1File = 'nginx/nginx_installer.ps1';
+              let ps1Content = fs.readFileSync(nginxPs1File, 'utf8');
+              let ps1Modified = false;
+
+              if (updates['NGINX']) {
+                shContent = shContent.replace(/NGINX_VERSION="([0-9.]+)"/, `NGINX_VERSION="${updates['NGINX'].latest}"`);
+                ps1Content = ps1Content.replace(/\$NGINX_VERSION = "([0-9.]+)"/, `$NGINX_VERSION = "${updates['NGINX'].latest}"`);
+                shModified = ps1Modified = true;
+                console.log(`Updated NGINX version to ${updates['NGINX'].latest}`);
+              }
+
+              if (updates['OpenSSL']) {
+                shContent = shContent.replace(/OPENSSL_VERSION="([0-9.]+)"/, `OPENSSL_VERSION="${updates['OpenSSL'].latest}"`);
+                ps1Content = ps1Content.replace(/\$OPENSSL_VERSION = "([0-9.]+)"/, `$OPENSSL_VERSION = "${updates['OpenSSL'].latest}"`);
+                shModified = ps1Modified = true;
+                console.log(`Updated OpenSSL version to ${updates['OpenSSL'].latest}`);
+              }
+
+              if (updates['PCRE2']) {
+                shContent = shContent.replace(/PCRE2_VERSION="([0-9.]+)"/, `PCRE2_VERSION="${updates['PCRE2'].latest}"`);
+                ps1Content = ps1Content.replace(/\$PCRE2_VERSION = "([0-9.]+)"/, `$PCRE2_VERSION = "${updates['PCRE2'].latest}"`);
+                shModified = ps1Modified = true;
+                console.log(`Updated PCRE2 version to ${updates['PCRE2'].latest}`);
+              }
+
+              if (updates['Zlib']) {
+                shContent = shContent.replace(/ZLIB_VERSION="([0-9.]+)"/, `ZLIB_VERSION="${updates['Zlib'].latest}"`);
+                ps1Content = ps1Content.replace(/\$ZLIB_VERSION = "([0-9.]+)"/, `$ZLIB_VERSION = "${updates['Zlib'].latest}"`);
+                shModified = ps1Modified = true;
+                console.log(`Updated Zlib version to ${updates['Zlib'].latest}`);
+              }
+
+              if (shModified) {
+                fs.writeFileSync(nginxShFile, shContent);
+                files.push(nginxShFile);
+                updatesMade = true;
+              }
+
+              if (ps1Modified) {
+                fs.writeFileSync(nginxPs1File, ps1Content);
+                files.push(nginxPs1File);
+                updatesMade = true;
+              }
+
+            } else if (labels.includes('kubernetes')) {
+              updateType = 'Kubernetes';
+              branchName = `automated-update/kubernetes-${Date.now()}`;
+
+              const k8sFile = 'kubernetes/kubernetes_installer.sh';
+              let content = fs.readFileSync(k8sFile, 'utf8');
+              let modified = false;
+
+              if (updates['Kubernetes']) {
+                content = content.replace(/K8S_VERSION:-([v0-9.]+)/, `K8S_VERSION:-${updates['Kubernetes'].latest}`);
+                modified = true;
+                console.log(`Updated Kubernetes version to ${updates['Kubernetes'].latest}`);
+              }
+
+              if (modified) {
+                fs.writeFileSync(k8sFile, content);
+                files.push(k8sFile);
+                updatesMade = true;
+              }
+
+            } else {
+              console.log('Unknown dependency type, skipping PR creation');
+              return;
+            }
+
+            if (!updatesMade) {
+              console.log('No updates were made to files');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `⚠️ Unable to automatically update files. Manual intervention required.\n\nPlease review the issue details and update the files manually.`
+              });
               return;
             }
 
@@ -118,69 +229,89 @@ jobs:
             });
 
             try {
-              await github.rest.git.createRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: `refs/heads/${branchName}`,
-                sha: mainBranch.data.commit.sha
-              });
+              execSync(`git checkout -b ${branchName}`, { stdio: 'inherit' });
               console.log(`Created branch ${branchName}`);
             } catch (error) {
-              if (error.status === 422) {
-                console.log('Branch already exists, using existing branch');
-              } else {
-                throw error;
-              }
+              console.error('Failed to create branch:', error.message);
+              throw error;
             }
 
-            // Create PR body with instructions and link to issue
+            // Commit changes
+            try {
+              execSync(`git add ${files.join(' ')}`, { stdio: 'inherit' });
+
+              const commitMessage = `chore: update ${updateType} dependencies
+
+${Object.entries(updates).map(([comp, vers]) => `- ${comp}: ${vers.current} → ${vers.latest}`).join('\n')}
+
+Automated update from issue #${issueNumber}`;
+
+              execSync(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
+              console.log('Committed changes');
+            } catch (error) {
+              console.error('Failed to commit:', error.message);
+              throw error;
+            }
+
+            // Push the branch
+            try {
+              execSync(`git push -u origin ${branchName}`, { stdio: 'inherit' });
+              console.log('Pushed branch');
+            } catch (error) {
+              console.error('Failed to push:', error.message);
+              throw error;
+            }
+
+            // Create PR body
             const prBody = `## Automated Dependency Update
 
-This PR addresses the dependency updates identified in issue #${issueNumber}.
+This PR automatically updates ${updateType} dependencies as identified in issue #${issueNumber}.
 
-### Changes Required
+### Changes Made
 
-The following files need to be updated:
-${files.map(f => `- [ ] \`${f}\``).join('\n')}
+${Object.entries(updates).map(([component, versions]) =>
+  `- **${component}**: ${versions.current} → ${versions.latest}`
+).join('\n')}
 
-### Update Information
+### Files Updated
 
-Please refer to issue #${issueNumber} for:
-- Current vs. latest version comparison
-- Download URLs and checksums (if applicable)
-- Testing instructions
+${files.map(f => `- \`${f}\``).join('\n')}
 
-### Manual Steps Required
+### ⚠️ Important Notes
 
-This PR creates the branch and structure. To complete the update:
+${updateType === 'NGINX' ? `
+**NGINX requires SHA256 checksum updates:**
 
-1. Check out this branch:
+After reviewing this PR, you'll need to:
+1. Download the new NGINX tarball and calculate its SHA256:
    \`\`\`bash
-   git checkout ${branchName}
+   wget https://nginx.org/download/nginx-${updates['NGINX']?.latest}.tar.gz
+   sha256sum nginx-${updates['NGINX']?.latest}.tar.gz
    \`\`\`
+2. Update the SHA256 checksums in both installer files
+3. Test the installation on a clean system
 
-2. Update the version numbers in the affected files according to issue #${issueNumber}
+**The PR cannot be merged until SHA256 checksums are updated.**
+` : ''}
 
-3. For NGINX updates: Download new tarballs and update SHA256 checksums
+### Testing Checklist
 
-4. Test the installation on a clean system
-
-5. Commit and push your changes:
-   \`\`\`bash
-   git add ${files.join(' ')}
-   git commit -m "Update ${updateType} dependencies"
-   git push
-   \`\`\`
+- [ ] Version numbers updated correctly
+${updateType === 'NGINX' ? '- [ ] SHA256 checksums updated and verified' : ''}
+- [ ] Installation tested on clean system
+- [ ] All functionality verified
 
 ### Verification
 
-- [ ] Version numbers updated in all files
-- [ ] SHA256 checksums updated (if applicable)
-- [ ] Installation tested on clean system
-- [ ] All tests pass
+Test the installation:
+\`\`\`bash
+${files[0].includes('ansible') ? './ansible/ansible_installer.sh' :
+  files[0].includes('nginx') ? './nginx/nginx_installer.sh' :
+  files[0].includes('kubernetes') ? './kubernetes/kubernetes_installer.sh' : './installer.sh'}
+\`\`\`
 
 ---
-*This PR was automatically created by the auto-update workflow.*
+*🤖 This PR was automatically created by the dependency management workflow.*
 *Related issue: #${issueNumber}*
 
 Closes #${issueNumber}
@@ -195,7 +326,7 @@ Closes #${issueNumber}
                 head: branchName,
                 base: context.payload.repository.default_branch,
                 body: prBody,
-                draft: true
+                draft: updateType === 'NGINX'  // Mark as draft if NGINX (needs SHA256 updates)
               });
 
               console.log(`Created PR #${pr.data.number}`);
@@ -205,15 +336,31 @@ Closes #${issueNumber}
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.data.number,
-                labels: ['dependencies', 'automated', ...labels.filter(l => l !== 'enhancement')]
+                labels: ['dependencies', 'automated', ...labels.filter(l => !['enhancement', 'dependencies'].includes(l))]
               });
 
               // Add comment to original issue with PR link
+              const commentBody = updateType === 'NGINX'
+                ? `🤖 **Automated PR Created**
+
+A pull request has been created with automated dependency updates: #${pr.data.number}
+
+⚠️ **Action Required:** The PR is marked as draft because NGINX updates require SHA256 checksum verification. Please:
+1. Review the version updates
+2. Download and verify SHA256 checksums
+3. Update the checksums in the installer files
+4. Mark the PR as ready for review`
+                : `🤖 **Automated PR Created**
+
+A pull request has been created with automated dependency updates: #${pr.data.number}
+
+The changes have been automatically applied. Please review and test before merging.`;
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: `🤖 **Automated PR Created**\n\nA pull request has been created to address this update: #${pr.data.number}\n\nPlease review the PR for instructions on completing the update.`
+                body: commentBody
               });
 
               console.log(`Successfully created PR and linked to issue #${issueNumber}`);
@@ -226,7 +373,11 @@ Closes #${issueNumber}
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: `⚠️ **Automated PR Creation Failed**\n\nThere was an error creating the automated pull request. Error: ${error.message}\n\nPlease create a pull request manually to address this update.`
+                body: `⚠️ **Automated PR Creation Failed**
+
+There was an error creating the automated pull request. Error: ${error.message}
+
+The branch \`${branchName}\` may have been created with updates. Please check and create a pull request manually if needed.`
               });
 
               throw error;
