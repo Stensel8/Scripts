@@ -51,18 +51,47 @@ A GitHub Actions workflow runs weekly (every Monday at 9:00 AM UTC) to check for
 - Python (built from source)
 - Ansible (from PyPI)
 
+**Kubernetes Installer:**
+- Kubernetes (kubectl) version
+- Minikube (uses latest release)
+
 **Other Installers:**
 - Docker (uses official repositories)
-- Kubernetes (kubectl)
-- Terraform
-- Podman
-- OpenSSH
+- Terraform (uses HashiCorp repositories)
+- Podman (uses distribution repositories)
+- OpenSSH (uses distribution repositories)
 
-When new versions are detected, the workflow automatically creates or updates GitHub issues with:
-- Current vs. latest version comparison
-- Files that need updating
-- Step-by-step update instructions
-- SHA256 checksum update reminders
+When new versions are detected, the workflow automatically:
+
+1. **Creates or updates GitHub issues** with:
+   - Current vs. latest version comparison
+   - Files that need updating
+   - Step-by-step update instructions
+   - SHA256 checksum update reminders (where applicable)
+
+2. **Triggers the Auto-Update Bot** to:
+   - **Automatically update version numbers** in installer files
+   - Create a Pull Request with actual code changes
+   - **For Ansible/Kubernetes**: Creates ready-to-merge PRs
+   - **For NGINX**: Creates draft PRs (requires SHA256 checksum verification)
+   - Auto-links issues and PRs together
+   - Provides testing instructions and checklists
+
+### NGINX Checksum Updates
+
+For NGINX dependency updates, use the helper script to calculate and update SHA256 checksums:
+
+```bash
+# Run from the repository root
+./.github/scripts/update-nginx-checksums.sh
+```
+
+This script will:
+- Download the current NGINX, OpenSSL, PCRE2, and Zlib versions
+- Calculate SHA256 checksums
+- Optionally update both `nginx_installer.sh` and `nginx_installer.ps1`
+
+This automated system provides **true self-maintenance** - the repository automatically detects updates, creates PRs with code changes, and only requires human review and testing before merging.
 
 ### Script Validation
 All installer scripts are automatically validated on every push and pull request:

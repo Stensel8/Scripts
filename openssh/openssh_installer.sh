@@ -1,630 +1,491 @@
 #!/usr/bin/env bash
 #########################################################################
 # OpenSSH Hardened Configuration Installer
-# 
-# This script installs OpenSSH from the system package manager and
-# applies hardened security configurations compatible with modern
-# systems and security best practices.
-# 
+#
+# Installs OpenSSH and applies a maximally hardened configuration.
+# Designed for modern systems where password authentication over SSH
+# is considered obsolete and insecure.
+#
+# Philosophy:
+#   SSH keys are the only acceptable authentication method for remote
+#   access. Passwords belong exclusively in sudo as a second layer,
+#   never as SSH authentication.
+#
+#   Recommendation: store your SSH private keys in Bitwarden (SSH Agent
+#   feature) or another password manager. This gives you:
+#     - Encrypted key storage
+#     - Cross-device key sync
+#     - Audit log of key usage
+#     - Easy revocation
+#
+#   External access: PKI auth only, FUTURE crypto policy (Fedora/RHEL)
+#   Internal access: PKI auth only, sudo for privilege escalation
+#
 # OpenSSH official website: https://www.openssh.com/
-# OpenSSH releases: https://github.com/openssh/openssh-portable/releases
-# 
-# Features:
-# - Installs OpenSSH server from package manager
-# - Applies security-hardened SSH configuration
-# - Generates strong host keys (ED25519 and RSA 3072-bit)
-# - Removes weak legacy keys
-# - Configures modern cryptographic algorithms
-# - Provides service management instructions
 #########################################################################
 
-# Safer error handling
 set -euo pipefail
 
-# Color definitions
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly PURPLE='\033[0;35m'
-readonly NC='\033[0m' # No Color
+readonly NC='\033[0m'
 readonly BOLD='\033[1m'
 
-# Configuration
 readonly BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
 readonly CONFIG_FILE="/etc/ssh/sshd_config"
 readonly ORIGINAL_CONFIG="${CONFIG_FILE}.original"
 readonly LOG_DIR="/tmp/openssh-logs-$$"
 
-# Detect SSH service name (differs between distributions)
 detect_ssh_service() {
     if systemctl list-unit-files | grep -q "^ssh\.service"; then
         echo "ssh"
     elif systemctl list-unit-files | grep -q "^sshd\.service"; then
         echo "sshd"
     else
-        # Default fallback
-        if command -v apt-get &>/dev/null; then
-            echo "ssh"
-        else
-            echo "sshd"
-        fi
+        command -v apt-get &>/dev/null && echo "ssh" || echo "sshd"
     fi
 }
 
 readonly SSH_SERVICE=$(detect_ssh_service)
-
-# Create directories
 mkdir -p "$LOG_DIR"
 
-# Logging functions
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_error() { echo -e "${RED}[✗]${NC} $1" >&2; }
-log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-log_step() { echo -e "${PURPLE}[→]${NC} ${BOLD}$1${NC}"; }
+log_error()   { echo -e "${RED}[✗]${NC} $1" >&2; }
+log_warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+log_step()    { echo -e "${PURPLE}[→]${NC} ${BOLD}$1${NC}"; }
 
-# Cleanup function
 cleanup() {
-    if [ -n "$LOG_DIR" ] && [ -d "$LOG_DIR" ]; then
-        rm -rf "$LOG_DIR"
-    fi
+    [ -n "$LOG_DIR" ] && [ -d "$LOG_DIR" ] && rm -rf "$LOG_DIR"
 }
 trap cleanup EXIT INT TERM
 
-# Check for root privileges
 check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        log_error "This script must be run as root"
-        echo -e "Usage: sudo $0"
-        exit 1
-    fi
+    [ "$EUID" -eq 0 ] || { log_error "Run as root: sudo $0"; exit 1; }
 }
 
-# Print header
 print_header() {
     echo
     echo -e "${BOLD}OpenSSH Hardened Configuration Installer${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Installing OpenSSH server with hardened security configuration"
+    echo -e "Ed25519-only · No password auth · FUTURE crypto policy compatible"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
 }
 
-# Detect package manager and install OpenSSH
 install_openssh() {
     log_step "Installing OpenSSH server"
-    
     if command -v apt-get &>/dev/null; then
-        log_info "Detected Debian/Ubuntu system"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq &>"$LOG_DIR/apt-update.log"
-        apt-get install -y openssh-server hostname &>"$LOG_DIR/apt-install.log"
+        apt-get install -y openssh-server &>"$LOG_DIR/apt-install.log"
     elif command -v dnf &>/dev/null; then
-        log_info "Detected Fedora/RHEL system"
-        dnf install -y openssh-server hostname &>"$LOG_DIR/dnf-install.log"
+        dnf install -y openssh-server &>"$LOG_DIR/dnf-install.log"
     elif command -v yum &>/dev/null; then
-        log_info "Detected CentOS/RHEL system"
-        yum install -y openssh-server hostname &>"$LOG_DIR/yum-install.log"
+        yum install -y openssh-server &>"$LOG_DIR/yum-install.log"
     else
-        log_error "Unsupported package manager. This script requires apt, dnf, or yum."
+        log_error "Unsupported package manager (requires apt, dnf, or yum)"
         exit 1
     fi
-    
     log_success "OpenSSH server installed"
 }
 
-# Create backup of existing configuration
 backup_config() {
-    log_step "Creating configuration backup"
-    
+    log_step "Backing up existing configuration"
     mkdir -p "$BACKUP_DIR"
-    
-    # Backup SSH configuration directory
-    if [ -d "/etc/ssh" ]; then
-        cp -a /etc/ssh "$BACKUP_DIR/"
-        log_info "SSH configuration backed up to $BACKUP_DIR"
-    fi
-    
-    # Save original config if not already saved
-    if [ -f "$CONFIG_FILE" ] && [ ! -f "$ORIGINAL_CONFIG" ]; then
-        cp "$CONFIG_FILE" "$ORIGINAL_CONFIG"
-        log_info "Original configuration saved as $ORIGINAL_CONFIG"
-    fi
-    
-    # Save current SSH service status
-    systemctl is-active "$SSH_SERVICE" &>/dev/null && echo "$SSH_SERVICE was active" > "$BACKUP_DIR/service_status.txt" || echo "$SSH_SERVICE was inactive" > "$BACKUP_DIR/service_status.txt"
-    
-    log_success "Configuration backup completed"
+    [ -d "/etc/ssh" ] && cp -a /etc/ssh "$BACKUP_DIR/"
+    [ -f "$CONFIG_FILE" ] && [ ! -f "$ORIGINAL_CONFIG" ] && cp "$CONFIG_FILE" "$ORIGINAL_CONFIG"
+    systemctl is-active "$SSH_SERVICE" &>/dev/null \
+        && echo "active"   > "$BACKUP_DIR/service_status.txt" \
+        || echo "inactive" > "$BACKUP_DIR/service_status.txt"
+    log_success "Backup saved to $BACKUP_DIR"
 }
 
-# Generate strong host keys
 generate_host_keys() {
-    log_step "Generating secure host keys"
-    
-    # Generate ED25519 key (modern, secure)
+    log_step "Generating Ed25519 host key"
+
+    # Ed25519 — the only host key we need
     if [ ! -f "/etc/ssh/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q
-        log_info "Generated ED25519 host key"
-    fi
-    
-    # Generate RSA 3072-bit key (compatible, secure)
-    if [ ! -f "/etc/ssh/ssh_host_rsa_key" ]; then
-        ssh-keygen -t rsa -b 3072 -f /etc/ssh/ssh_host_rsa_key -N '' -q
+        log_info "Generated Ed25519 host key"
     else
-        # Check if existing RSA key is less than 3072 bits
-        local key_bits=$(ssh-keygen -lf /etc/ssh/ssh_host_rsa_key | awk '{print $1}')
-        if [ "$key_bits" -lt 3072 ]; then
-            log_warn "Existing RSA key is only $key_bits bits, regenerating with 3072 bits"
-            rm -f /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub
-            ssh-keygen -t rsa -b 3072 -f /etc/ssh/ssh_host_rsa_key -N '' -q
-        fi
+        log_info "Ed25519 host key already exists"
     fi
-    log_info "Generated/verified RSA 3072-bit host key"
-    
-    # Remove weak legacy keys
-    for key_type in dsa ecdsa; do
+
+    # Remove weak legacy keys (RSA, ECDSA, DSA)
+    for key_type in rsa ecdsa dsa; do
         if [ -f "/etc/ssh/ssh_host_${key_type}_key" ]; then
-            rm -f "/etc/ssh/ssh_host_${key_type}_key" "/etc/ssh/ssh_host_${key_type}_key.pub"
-            log_info "Removed weak $key_type host key"
+            rm -f "/etc/ssh/ssh_host_${key_type}_key" \
+                  "/etc/ssh/ssh_host_${key_type}_key.pub"
+            log_info "Removed legacy $key_type host key"
         fi
     done
-    
-    # Set proper permissions
+
     chmod 600 /etc/ssh/ssh_host_*_key
     chmod 644 /etc/ssh/ssh_host_*_key.pub
-    
-    log_success "Host keys configured securely"
+    log_success "Host keys configured (Ed25519 only)"
 }
 
-# Create privilege separation directory
-create_privilege_separation_dir() {
-    log_step "Creating privilege separation directory"
-    
-    # Create /run/sshd directory if it doesn't exist
-    if [ ! -d "/run/sshd" ]; then
-        mkdir -p /run/sshd
-        chmod 755 /run/sshd
-        chown root:root /run/sshd
-        log_info "Created /run/sshd directory with proper permissions"
-    else
-        # Ensure proper permissions even if directory exists
-        chmod 755 /run/sshd
-        chown root:root /run/sshd
-        log_info "Verified /run/sshd directory permissions"
-    fi
-    
-    log_success "Privilege separation directory configured"
-}
-
-# Apply hardened SSH configuration
 configure_ssh() {
-    log_step "Applying hardened SSH configuration"
-    
-    # Find SFTP subsystem path
-    local sftp_path
-    if [ -f "/usr/lib/openssh/sftp-server" ]; then
-        sftp_path="/usr/lib/openssh/sftp-server"
-    elif [ -f "/usr/libexec/sftp-server" ]; then
-        sftp_path="/usr/libexec/sftp-server"
-    else
-        sftp_path="/usr/lib/ssh/sftp-server"
-    fi
-    
-    # Create hardened SSH configuration
-    cat > "$CONFIG_FILE" << EOF
-# Hardened OpenSSH Configuration
-# Compatible with modern systems and security best practices
+    log_step "Writing hardened SSH configuration"
 
-# Network settings
+    # Write new configuration to a temporary file first, so we can validate it
+    local tmp_config
+    tmp_config="$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")"
+
+    cat > "$tmp_config" << 'EOF'
+# =============================================================================
+# Hardened OpenSSH Server Configuration
+# Ed25519-only · No password auth · FUTURE crypto policy compatible
+#
+# CVE mitigations:
+#   CVE-2023-51767 — Ed25519 only (no RSA)
+#   CVE-2025-26465 — UseDNS no
+#   CVE-2025-26466 — LoginGraceTime 30, MaxStartups 20:50:100
+#   CVE-2025-32728 — All forwarding explicitly disabled
+#
+# Key philosophy:
+#   Password authentication over SSH is obsolete and insecure.
+#   SSH keys are the only acceptable remote auth method.
+#
+#   Recommendation: store your SSH keys in Bitwarden (SSH Agent feature).
+#   This gives you encrypted storage, cross-device sync, audit logs, and
+#   easy revocation — without ever exposing your private key.
+#
+#   Use passwords only for sudo (local privilege escalation), never for
+#   SSH authentication itself.
+#
+#   External access: PKI auth only, FUTURE crypto policy (Fedora/RHEL)
+#   Internal access: PKI auth only, sudo as the second layer
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Network
+# -----------------------------------------------------------------------------
 Port 22
 AddressFamily any
-ListenAddress 0.0.0.0
-ListenAddress ::
 
-# Host keys (only strong algorithms)
+# -----------------------------------------------------------------------------
+# Host Keys — Ed25519 only
+# -----------------------------------------------------------------------------
 HostKey /etc/ssh/ssh_host_ed25519_key
-HostKey /etc/ssh/ssh_host_rsa_key
 
-# Authentication settings
-LoginGraceTime 30
+# -----------------------------------------------------------------------------
+# Authentication
+# -----------------------------------------------------------------------------
 PermitRootLogin no
 StrictModes yes
-MaxAuthTries 3
-MaxSessions 2
+PermitEmptyPasswords no
+
+# Public key authentication — the only accepted method
 PubkeyAuthentication yes
+AuthenticationMethods publickey
 AuthorizedKeysFile .ssh/authorized_keys
 
-# Password authentication (can be disabled for key-only access)
-PasswordAuthentication yes
-PermitEmptyPasswords no
+# PasswordAuthentication is disabled. SSH passwords are not of this era.
+# If you're locked out and need emergency access:
+#   1. Get console access to the machine
+#   2. Temporarily uncomment the line below and restart sshd
+#   3. Fix your keys, then re-disable password auth immediately
+# PasswordAuthentication yes
+PasswordAuthentication no
+
+# Disable all other auth methods
 ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+HostbasedAuthentication no
+GSSAPIAuthentication no
 
-# PAM authentication
-UsePAM yes
+# UsePAM: disabled — we don't need PAM for key-only auth
+# WARNING: on some distros this affects account/session modules.
+# If you see login issues, re-enable and investigate pam config.
+UsePAM no
 
-# Connection settings
+# Restrict to specific users (recommended — add your username)
+# AllowUsers youruser
+
+# -----------------------------------------------------------------------------
+# DoS / Connection Protection
+# -----------------------------------------------------------------------------
+LoginGraceTime 30
+MaxAuthTries 3
+MaxSessions 10
+MaxStartups 20:50:100
+PerSourceMaxStartups 20
+PerSourceNetBlockSize 32:128
 ClientAliveInterval 300
 ClientAliveCountMax 2
-TCPKeepAlive yes
+TCPKeepAlive no
 
-# Strong cryptographic settings
-Protocol 2
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
-HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
+# -----------------------------------------------------------------------------
+# Cryptographic Algorithms — FUTURE policy compatible
+# Ed25519 + curve25519 + AES-256 + SHA-256+ only
+# No RSA, no ECDSA, no SHA-1, no AES-128
+# -----------------------------------------------------------------------------
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+HostKeyAlgorithms ssh-ed25519
+PubkeyAcceptedAlgorithms ssh-ed25519,sk-ssh-ed25519@openssh.com
 
-# Security hardening
+# No compression — faster on modern connections, avoids CRIME-style attacks
+Compression no
+
+# -----------------------------------------------------------------------------
+# Forwarding — all disabled
+# -----------------------------------------------------------------------------
 AllowAgentForwarding no
 AllowTcpForwarding no
+AllowStreamLocalForwarding no
 GatewayPorts no
 X11Forwarding no
+X11UseLocalhost yes
 PermitTunnel no
-PrintMotd yes
-PrintLastLog yes
-Compression no
+PermitUserEnvironment no
+StreamLocalBindUnlink no
+IgnoreRhosts yes
+
+# -----------------------------------------------------------------------------
+# Privacy & DNS
+# -----------------------------------------------------------------------------
 UseDNS no
+PrintMotd no
+PrintLastLog yes
 
+# -----------------------------------------------------------------------------
 # Logging
+# -----------------------------------------------------------------------------
 SyslogFacility AUTH
-LogLevel INFO
+LogLevel VERBOSE
 
-# SFTP subsystem
-Subsystem sftp $sftp_path
-
-# Banner (optional)
-# Banner /etc/issue.net
+# -----------------------------------------------------------------------------
+# SFTP
+# -----------------------------------------------------------------------------
 EOF
-    
-    # Set proper permissions
-    chmod 644 "$CONFIG_FILE"
-    
-    # Create privilege separation directory required by sshd
+
+    # Append sftp subsystem line
+    echo "Subsystem sftp internal-sftp -f AUTHPRIV -l INFO" >> "$tmp_config"
+
+    chmod 644 "$tmp_config"
+
+    # Validate the new config before replacing the live one
+    local validation_output
+    if ! validation_output=$(sshd -t -f "$tmp_config" 2>&1); then
+        log_error "New configuration failed validation; original config left intact"
+        echo "$validation_output" >&2
+        rm -f "$tmp_config"
+        return 1
+    fi
+
+    # Atomically replace the live config
+    mv -f "$tmp_config" "$CONFIG_FILE"
+
     mkdir -p /run/sshd
-    chmod 0755 /run/sshd
-    
-    log_success "Hardened SSH configuration applied"
+    chmod 755 /run/sshd
+
+    log_success "SSH configuration written"
 }
 
-# Configure firewall (if available)
 configure_firewall() {
-    log_step "Configuring firewall for SSH"
-    
-    # Try to configure firewall if available
-    if command -v ufw &>/dev/null; then
-        ufw allow ssh &>/dev/null || true
-        log_info "UFW firewall configured for SSH"
-    elif command -v firewall-cmd &>/dev/null; then
+    log_step "Configuring firewall"
+    if command -v firewall-cmd &>/dev/null; then
         firewall-cmd --permanent --add-service=ssh &>/dev/null || true
         firewall-cmd --reload &>/dev/null || true
-        log_info "Firewalld configured for SSH"
+        log_info "firewalld configured for SSH"
+    elif command -v ufw &>/dev/null; then
+        ufw allow ssh &>/dev/null || true
+        log_info "ufw configured for SSH"
     else
-        log_warn "No firewall detected. Ensure SSH port 22 is accessible"
+        log_warn "No firewall detected — ensure port 22 is accessible"
     fi
-    
-    log_success "Firewall configuration completed"
+    log_success "Firewall done"
 }
 
-# Test SSH configuration
 test_configuration() {
     log_step "Testing SSH configuration"
-    
-    # Test configuration syntax
     if sshd -t 2>/dev/null; then
-        log_success "SSH configuration syntax is valid"
+        log_success "Configuration syntax valid"
     else
-        log_error "SSH configuration has syntax errors"
-        log_info "Running configuration test with verbose output:"
+        log_error "Configuration has syntax errors:"
         sshd -t
         return 1
     fi
-    
-    # Check if SSH service can start
-    if systemctl is-active --quiet "$SSH_SERVICE"; then
-        log_info "SSH service is already running"
-    else
-        if systemctl start "$SSH_SERVICE"; then
-            log_success "SSH service started successfully"
-        else
-            log_error "Failed to start SSH service"
-            return 1
-        fi
-    fi
-    
-    log_success "SSH configuration test passed"
 }
 
-# Show installation summary
 show_summary() {
+    local ssh_version
+    ssh_version=$(sshd -V 2>&1 | grep -o 'OpenSSH_[^ ]*' || echo "unknown")
+
     echo
-    echo -e "${BOLD}Installation Summary${NC}"
+    echo -e "${BOLD}Summary${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    if command -v sshd &>/dev/null; then
-        local ssh_version=$(sshd -V 2>&1 | head -1 | grep -o 'OpenSSH_[^ ]*' || echo "Unknown")
-        echo -e "${GREEN}✓${NC} OpenSSH server installed: $ssh_version"
-        echo -e "${GREEN}✓${NC} Hardened security configuration applied"
-        echo -e "${GREEN}✓${NC} Strong host keys generated (ED25519 + RSA 3072)"
-        echo -e "${GREEN}✓${NC} Weak legacy keys removed"
-        
-        if systemctl is-active --quiet "$SSH_SERVICE"; then
-            echo -e "${GREEN}✓${NC} SSH service is running"
-        else
-            echo -e "${YELLOW}!${NC} SSH service is not running"
-        fi
-    else
-        echo -e "${RED}✗${NC} OpenSSH installation may have failed"
+    echo -e "${GREEN}✓${NC} $ssh_version installed"
+    echo -e "${GREEN}✓${NC} Ed25519-only host key"
+    echo -e "${GREEN}✓${NC} Password authentication disabled"
+    echo -e "${GREEN}✓${NC} FUTURE crypto policy compatible"
+    echo -e "${GREEN}✓${NC} All forwarding disabled"
+    echo -e "${GREEN}✓${NC} CVE mitigations applied"
+    systemctl is-active --quiet "$SSH_SERVICE" \
+        && echo -e "${GREEN}✓${NC} sshd running" \
+        || echo -e "${YELLOW}!${NC} sshd not running"
+    echo
+    echo -e "${BOLD}Next steps${NC}"
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local ip_hint="host"
+    if command -v hostname >/dev/null 2>&1; then
+        ip_hint=$(hostname -I 2>/dev/null | awk '{print $1}')
     fi
-    
+    if [[ -z "${ip_hint}" ]] && command -v ip >/dev/null 2>&1; then
+        ip_hint=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+    fi
+    [[ -z "${ip_hint}" ]] && ip_hint="host"
+    echo -e "1. Add your public key:  ${BLUE}ssh-copy-id user@host${NC}"
+    echo -e "2. Test login:           ${BLUE}ssh user@${ip_hint}${NC}"
+    echo -e "3. Store key in:         ${BLUE}Bitwarden SSH Agent${NC}"
+    echo -e "4. On Fedora/RHEL:       ${BLUE}sudo update-crypto-policies --set FUTURE${NC}"
     echo
-    echo -e "${BOLD}Service Management${NC}"
-    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Start SSH:      ${BLUE}sudo systemctl start $SSH_SERVICE${NC}"
-    echo -e "Stop SSH:       ${BLUE}sudo systemctl stop $SSH_SERVICE${NC}"
-    echo -e "Restart SSH:    ${BLUE}sudo systemctl restart $SSH_SERVICE${NC}"
-    echo -e "Enable SSH:     ${BLUE}sudo systemctl enable $SSH_SERVICE${NC}"
-    echo -e "Status:         ${BLUE}sudo systemctl status $SSH_SERVICE${NC}"
-    echo -e "Test config:    ${BLUE}sudo sshd -t${NC}"
-    echo
-    echo -e "${BOLD}Connection Information${NC}"
-    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "SSH Port:       ${BLUE}22${NC}"
-    echo -e "Service name:   ${BLUE}$SSH_SERVICE${NC}"
-    echo -e "Config file:    ${BLUE}$CONFIG_FILE${NC}"
-    echo -e "Host keys:      ${BLUE}/etc/ssh/ssh_host_*_key${NC}"
-    echo -e "Backup:         ${BLUE}$BACKUP_DIR${NC}"
-    
-    # Show server IP addresses
-    echo -e "Server IPs:     ${BLUE}$(hostname -I | tr ' ' '\n' | head -3 | tr '\n' ' ')${NC}"
-    echo
-    echo -e "${BOLD}Security Notes${NC}"
-    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "• Root login is ${RED}disabled${NC} for security"
-    echo -e "• Password authentication is ${GREEN}enabled${NC} (can be disabled)"
-    echo -e "• Strong cryptographic algorithms enforced"
-    echo -e "• Connection limits: 3 auth tries, 2 max sessions"
-    echo -e "• Forwarding disabled for security"
-    echo
-    echo -e "${YELLOW}Connect with:${NC} ${BLUE}ssh username@$(hostname -I | awk '{print $1}')${NC}"
+    echo -e "${YELLOW}Emergency password access:${NC}"
+    echo -e "Uncomment ${BLUE}PasswordAuthentication yes${NC} in $CONFIG_FILE"
+    echo -e "then ${BLUE}sudo systemctl restart $SSH_SERVICE${NC} — fix keys — re-disable."
     echo
 }
 
-# Install OpenSSH with hardened configuration
 install() {
-    log_info "Starting OpenSSH hardened installation"
-    
-    # Safety check for SSH sessions
     if [[ -n "${SSH_CONNECTION:-}" ]] && [[ "${FORCE_SSH_INSTALL:-}" != "1" ]]; then
-        log_error "Running in SSH session! This will modify SSH configuration."
-        log_warn "If you have console access, run: FORCE_SSH_INSTALL=1 $0 install"
-        log_warn "Or use 'screen' or 'tmux' to maintain session during restart"
+        log_error "Running in SSH session — this will modify SSH config."
+        log_warn "Use tmux/screen, or: FORCE_SSH_INSTALL=1 $0 install"
         exit 1
     fi
-    
-    # Confirm installation
+
     if [[ "${CONFIRM:-}" != "yes" ]]; then
         if [[ -t 0 ]]; then
-            # Interactive mode
-            read -rp "Proceed with OpenSSH hardened installation? This will modify SSH configuration. [y/N] " answer
-            [[ "${answer,,}" != "y" ]] && { log_error "Installation cancelled"; exit 0; }
+            read -rp "Install hardened OpenSSH? This disables password auth. [y/N] " answer
+            [[ "${answer,,}" != "y" ]] && { log_error "Cancelled"; exit 0; }
         else
-            # Non-interactive mode (piped)
-            log_error "Non-interactive mode detected. Use: curl ... | CONFIRM=yes sudo bash -s install"
+            log_error "Non-interactive: use CONFIRM=yes $0 install"
             exit 0
         fi
     fi
-    
+
     check_root
     print_header
-    
     backup_config
     install_openssh
     generate_host_keys
-    create_privilege_separation_dir
     configure_ssh
     configure_firewall
     test_configuration
-    
-    # Enable and start SSH service
     systemctl enable "$SSH_SERVICE"
     systemctl restart "$SSH_SERVICE"
-    
     show_summary
-    
-    log_success "OpenSSH hardened installation completed successfully!"
+    log_success "Done!"
 }
 
-# Remove OpenSSH and restore original configuration
 remove() {
-    log_info "Removing OpenSSH installation..."
-    
-    # Confirm removal
+    check_root
+
     if [[ "${CONFIRM:-}" != "yes" ]]; then
         if [[ -t 0 ]]; then
-            # Interactive mode
-            read -rp "Remove OpenSSH server? This will uninstall OpenSSH and restore original config. [y/N] " answer
-            [[ "${answer,,}" != "y" ]] && { log_error "Removal cancelled"; exit 0; }
+            read -rp "Remove OpenSSH server? [y/N] " answer
+            [[ "${answer,,}" != "y" ]] && { log_error "Cancelled"; exit 0; }
         else
-            # Non-interactive mode (piped)
-            log_error "Non-interactive mode detected. Use: curl ... | CONFIRM=yes sudo bash -s remove"
+            log_error "Non-interactive: use CONFIRM=yes $0 remove"
             exit 0
         fi
     fi
-    
-    # Stop SSH service
-    if systemctl is-active --quiet "$SSH_SERVICE"; then
-        log_info "Stopping SSH service..."
-        systemctl stop "$SSH_SERVICE"
-    fi
-    
-    # Disable SSH service
-    if systemctl is-enabled --quiet "$SSH_SERVICE"; then
-        log_info "Disabling SSH service..."
-        systemctl disable "$SSH_SERVICE"
-    fi
-    
-    # Restore original configuration if it exists
-    if [ -f "$ORIGINAL_CONFIG" ]; then
-        cp "$ORIGINAL_CONFIG" "$CONFIG_FILE"
-        log_info "Original SSH configuration restored"
-    fi
-    
-    # Remove OpenSSH server package
+
+    systemctl is-active --quiet "$SSH_SERVICE" && systemctl stop "$SSH_SERVICE" || true
+    systemctl is-enabled --quiet "$SSH_SERVICE" && systemctl disable "$SSH_SERVICE" || true
+    [ -f "$ORIGINAL_CONFIG" ] && cp "$ORIGINAL_CONFIG" "$CONFIG_FILE" && log_info "Original config restored"
+
+    local remove_failed=0
     if command -v apt-get &>/dev/null; then
-        apt-get remove -y openssh-server &>"$LOG_DIR/apt-remove.log"
-        apt-get autoremove -y &>"$LOG_DIR/apt-autoremove.log"
+        apt-get remove -y openssh-server &>/dev/null || { log_error "apt-get remove failed"; remove_failed=1; }
     elif command -v dnf &>/dev/null; then
-        dnf remove -y openssh-server &>"$LOG_DIR/dnf-remove.log"
+        dnf remove -y openssh-server &>/dev/null || { log_error "dnf remove failed"; remove_failed=1; }
     elif command -v yum &>/dev/null; then
-        yum remove -y openssh-server &>"$LOG_DIR/yum-remove.log"
+        yum remove -y openssh-server &>/dev/null || { log_error "yum remove failed"; remove_failed=1; }
     fi
-    
-    log_success "OpenSSH server removed"
-    log_warn "SSH service has been stopped and disabled"
-    log_info "Configuration backup remains in: $BACKUP_DIR"
-}
 
-# Verify OpenSSH installation and configuration
-verify() {
-    log_info "Verifying OpenSSH installation..."
-    
-    local issues=0
-    
-    # Check if OpenSSH is installed
-    if command -v sshd &>/dev/null; then
-        local ssh_version=$(sshd -V 2>&1 | head -1 | grep -o 'OpenSSH_[^ ]*' || echo "Unknown")
-        log_success "OpenSSH server installed: $ssh_version"
+    if [ "$remove_failed" -eq 0 ]; then
+        log_success "OpenSSH removed. Backup: $BACKUP_DIR"
     else
-        log_error "OpenSSH server not found"
-        ((issues++))
-    fi
-    
-    # Check configuration file
-    if [ -f "$CONFIG_FILE" ]; then
-        log_success "SSH configuration file exists: $CONFIG_FILE"
-        
-        # Test configuration
-        if sshd -t 2>/dev/null; then
-            log_success "SSH configuration syntax is valid"
-        else
-            log_error "SSH configuration has syntax errors"
-            ((issues++))
-        fi
-    else
-        log_error "SSH configuration file not found"
-        ((issues++))
-    fi
-    
-    # Check service status
-    if systemctl is-active --quiet "$SSH_SERVICE"; then
-        log_success "SSH service is running"
-    else
-        log_warn "SSH service is not running"
-    fi
-    
-    if systemctl is-enabled --quiet "$SSH_SERVICE"; then
-        log_success "SSH service is enabled"
-    else
-        log_warn "SSH service is not enabled"
-    fi
-    
-    # Check host keys
-    local key_count=0
-    for key in /etc/ssh/ssh_host_*_key; do
-        if [ -f "$key" ]; then
-            local key_type=$(echo "$key" | sed 's/.*ssh_host_\(.*\)_key/\1/')
-            local key_info=$(ssh-keygen -lf "$key" 2>/dev/null || echo "Invalid key")
-            log_success "Host key ($key_type): $key_info"
-            ((key_count++))
-        fi
-    done
-    
-    if [ "$key_count" -gt 0 ]; then
-        log_success "Host keys are configured"
-    else
-        log_error "No host keys found"
-        ((issues++))
-    fi
-    
-    # Check listening ports
-    if command -v ss &>/dev/null; then
-        local ssh_ports=$(ss -tlnp | grep :22 | wc -l)
-        if [ "$ssh_ports" -gt 0 ]; then
-            log_success "SSH is listening on port 22"
-        else
-            log_warn "SSH is not listening on port 22"
-        fi
-    fi
-    
-    # Check directories and permissions
-    local dirs=("/etc/ssh" "/var/log" "/run/sshd")
-    for dir in "${dirs[@]}"; do
-        if [[ -d "$dir" ]]; then
-            log_success "Directory exists: $dir"
-        else
-            log_error "Directory missing: $dir"
-            ((issues++))
-        fi
-    done
-
-    mkdir -p /run/sshd
-    chmod 0755 /run/sshd
-    
-    echo
-    if [[ $issues -eq 0 ]]; then
-        log_success "OpenSSH installation verification passed!"
-        return 0
-    else
-        log_error "OpenSSH installation verification failed with $issues issues"
+        log_warn "OpenSSH removal encountered errors. Backup: $BACKUP_DIR"
         return 1
     fi
 }
 
-# Main function
+verify() {
+    local issues=0
+
+    command -v sshd &>/dev/null \
+        && log_success "sshd found: $(sshd -V 2>&1 | grep -o 'OpenSSH_[^ ]*')" \
+        || { log_error "sshd not found"; ((issues++)); }
+
+    [ -f "$CONFIG_FILE" ] && sshd -t 2>/dev/null \
+        && log_success "Config syntax valid" \
+        || { log_error "Config invalid or missing"; ((issues++)); }
+
+    systemctl is-active --quiet  "$SSH_SERVICE" && log_success "sshd running"  || log_warn "sshd not running"
+    systemctl is-enabled --quiet "$SSH_SERVICE" && log_success "sshd enabled"  || log_warn "sshd not enabled"
+
+    for key in /etc/ssh/ssh_host_*_key; do
+        [ -f "$key" ] && log_success "Host key: $(ssh-keygen -lf "$key" 2>/dev/null)"
+    done
+    if [ ! -f "/etc/ssh/ssh_host_ed25519_key" ]; then
+        log_error "Ed25519 host key not found"
+        ((issues++))
+    fi
+
+    if command -v ss &>/dev/null; then
+        if ss -tlnp | grep -q :22; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    elif command -v netstat &>/dev/null; then
+        if netstat -tlnp 2>/dev/null | grep -q ':22'; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    elif command -v lsof &>/dev/null; then
+        if lsof -iTCP:22 -sTCP:LISTEN -nP &>/dev/null; then
+            log_success "Listening on :22"
+        else
+            log_warn "Not listening on :22"
+        fi
+    else
+        log_warn "Cannot verify listening port :22 (no ss/netstat/lsof available)"
+    fi
+
+    [ $issues -eq 0 ] && log_success "Verification passed" || { log_error "$issues issue(s) found"; return 1; }
+}
+
 main() {
     case "${1:-help}" in
-        install)
-            install
-            ;;
-        remove)
-            check_root
-            remove
-            ;;
-        verify)
-            verify
-            ;;
+        install) install ;;
+        remove)  remove  ;;
+        verify)  verify  ;;
         *)
             echo
             echo -e "${BOLD}OpenSSH Hardened Configuration Installer${NC}"
             echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Usage: $0 {install|remove|verify}"
             echo
-            echo "  install - Install OpenSSH server with hardened configuration"
-            echo "  remove  - Remove OpenSSH server and restore original configuration"
-            echo "  verify  - Check OpenSSH installation and configuration status"
+            echo "  install   Install OpenSSH with hardened config (no password auth)"
+            echo "  remove    Remove OpenSSH and restore original config"
+            echo "  verify    Verify installation and config"
             echo
-            echo "Environment variables:"
-            echo "  CONFIRM=yes         - Skip installation confirmation"
-            echo "  FORCE_SSH_INSTALL=1 - Allow installation over SSH (risky!)"
-            echo
-            echo "Examples:"
-            echo "  $0 install                    # Interactive installation"
-            echo "  CONFIRM=yes $0 install       # Non-interactive installation"
-            echo "  $0 verify                     # Check installation"
-            echo "  $0 remove                     # Remove installation"
-            echo
-            echo "Features:"
-            echo "  • Installs OpenSSH from system package manager"
-            echo "  • Applies hardened security configuration"
-            echo "  • Generates strong host keys (ED25519 + RSA 3072)"
-            echo "  • Removes weak legacy keys"
-            echo "  • Disables insecure features and protocols"
-            echo "  • Compatible with modern SSH clients"
+            echo "Env vars:"
+            echo "  CONFIRM=yes          Skip confirmation prompt"
+            echo "  FORCE_SSH_INSTALL=1  Allow running over SSH (risky)"
             echo
             ;;
     esac
 }
 
-# Run main function
 main "$@"

@@ -62,7 +62,7 @@ jobs:
         id: pcre2
         run: |
           CURRENT_VERSION=$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)
-          echo "current=$CURRENT_OUTPUT" >> $GITHUB_OUTPUT
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
           # Get latest version from GitHub releases
           LATEST_VERSION=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/PCRE2Project/pcre2/releases/latest | jq -r '.tag_name' | sed 's/pcre2-//')
@@ -268,6 +268,146 @@ jobs:
               console.log('Created new issue');
             }
 
+  check-kubernetes-deps:
+    name: Check Kubernetes Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check Kubernetes version
+        id: kubernetes
+        run: |
+          CURRENT_VERSION=$(grep -oP 'K8S_VERSION:-\K[^}]+' kubernetes/kubernetes_installer.sh)
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Get latest stable version from Kubernetes releases
+          LATEST_VERSION=$(curl -sL https://dl.k8s.io/release/stable.txt | sed 's/\.[0-9]*$//')
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+          if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Minikube version
+        id: minikube
+        run: |
+          # Get latest minikube version from GitHub releases
+          LATEST_VERSION=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/kubernetes/minikube/releases/latest | jq -r '.tag_name')
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Note: Minikube uses 'latest' in installer script"
+          echo "update_needed=false" >> $GITHUB_OUTPUT
+
+      - name: Create or update issue
+        if: steps.kubernetes.outputs.update_needed == 'true'
+        uses: actions/github-script@v8
+        env:
+          K8S_UPDATE_NEEDED: ${{ steps.kubernetes.outputs.update_needed }}
+          K8S_CURRENT: ${{ steps.kubernetes.outputs.current }}
+          K8S_LATEST: ${{ steps.kubernetes.outputs.latest }}
+          MINIKUBE_LATEST: ${{ steps.minikube.outputs.latest }}
+        with:
+          script: |
+            const issueTitle = '🔄 Kubernetes Dependencies Update Available';
+            const issueBody = `## Kubernetes Installer Dependencies Update
+
+            The following dependencies have updates available:
+
+            ${process.env.K8S_UPDATE_NEEDED === 'true' ? `- **Kubernetes**: ${process.env.K8S_CURRENT} → ${process.env.K8S_LATEST}` : ''}
+
+            **Note:** Minikube uses latest release automatically (current latest: ${process.env.MINIKUBE_LATEST})
+
+            ### Files to update:
+            - \`kubernetes/kubernetes_installer.sh\`
+
+            ### Update steps:
+            1. Update \`K8S_VERSION\` in the script
+            2. Test the installation on a clean system
+            3. Verify kubectl and minikube functionality
+
+            ---
+            *This issue was automatically created by the dependency check workflow.*
+            *Last checked: ${new Date().toISOString()}*`;
+
+            // Search for existing issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'dependencies,kubernetes'
+            });
+
+            const existingIssue = issues.data.find(issue => issue.title === issueTitle);
+
+            if (existingIssue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: issueBody
+              });
+              console.log(`Updated issue #${existingIssue.number}`);
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: ['dependencies', 'kubernetes', 'enhancement']
+              });
+              console.log('Created new issue');
+            }
+
+  check-terraform-deps:
+    name: Check Terraform Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check Terraform version
+        id: terraform
+        run: |
+          # Terraform uses HashiCorp repositories, so check latest from HashiCorp
+          LATEST_VERSION=$(curl -sL https://checkpoint-api.hashicorp.com/v1/check/terraform | jq -r '.current_version')
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Note: Terraform installer uses HashiCorp repository, which provides latest versions"
+          echo "update_needed=false" >> $GITHUB_OUTPUT
+
+  check-podman-deps:
+    name: Check Podman Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check Podman version
+        id: podman
+        run: |
+          # Podman uses distribution repositories, get latest from GitHub releases as reference
+          LATEST_VERSION=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/containers/podman/releases/latest | jq -r '.tag_name' | sed 's/v//')
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Note: Podman installer uses distribution repositories, not hardcoded versions"
+          echo "update_needed=false" >> $GITHUB_OUTPUT
+
+  check-openssh-deps:
+    name: Check OpenSSH Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check OpenSSH version
+        id: openssh
+        run: |
+          # OpenSSH uses distribution repositories, get latest portable version as reference
+          LATEST_VERSION=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/openssh/openssh-portable/releases/latest | jq -r '.tag_name' | sed 's/V_//;s/_/./g')
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Note: OpenSSH installer uses distribution repositories, not hardcoded versions"
+          echo "update_needed=false" >> $GITHUB_OUTPUT
+
   check-docker:
     name: Check Docker Installation
     runs-on: ubuntu-latest
@@ -283,19 +423,23 @@ jobs:
   summary:
     name: Summary
     runs-on: ubuntu-latest
-    needs: [check-nginx-deps, check-ansible-deps, check-docker]
+    needs: [check-nginx-deps, check-ansible-deps, check-kubernetes-deps, check-terraform-deps, check-podman-deps, check-openssh-deps, check-docker]
     if: always()
     steps:
       - name: Summary
         run: |
           NGINX_RESULT="${{ needs.check-nginx-deps.result }}"
           ANSIBLE_RESULT="${{ needs.check-ansible-deps.result }}"
+          K8S_RESULT="${{ needs.check-kubernetes-deps.result }}"
+          TERRAFORM_RESULT="${{ needs.check-terraform-deps.result }}"
+          PODMAN_RESULT="${{ needs.check-podman-deps.result }}"
+          OPENSSH_RESULT="${{ needs.check-openssh-deps.result }}"
           DOCKER_RESULT="${{ needs.check-docker.result }}"
 
           echo "### Dependency Check Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$NGINX_RESULT" = "success" ] && [ "$ANSIBLE_RESULT" = "success" ] && [ "$DOCKER_RESULT" = "success" ]; then
+          if [ "$NGINX_RESULT" = "success" ] && [ "$ANSIBLE_RESULT" = "success" ] && [ "$K8S_RESULT" = "success" ] && [ "$TERRAFORM_RESULT" = "success" ] && [ "$PODMAN_RESULT" = "success" ] && [ "$OPENSSH_RESULT" = "success" ] && [ "$DOCKER_RESULT" = "success" ]; then
             echo "✅ All dependency checks completed successfully." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "⚠️ Some dependency checks did not complete successfully. See details below." >> "$GITHUB_STEP_SUMMARY"
@@ -306,6 +450,10 @@ jobs:
           echo "|-----------------------|----------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| NGINX dependencies    | $NGINX_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Ansible dependencies  | $ANSIBLE_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kubernetes dependencies | $K8S_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Terraform installation | $TERRAFORM_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Podman installation   | $PODMAN_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| OpenSSH installation  | $OPENSSH_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Docker installation   | $DOCKER_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "If any updates are needed, issues have been created or updated automatically." >> "$GITHUB_STEP_SUMMARY"
