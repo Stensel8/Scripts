@@ -93,6 +93,24 @@ This script will:
 
 This automated system provides **true self-maintenance** - the repository automatically detects updates, creates PRs with code changes, and only requires human review and testing before merging.
 
+### Automatic PR Approval and Merge
+
+The repository includes workflows that automatically approve and merge Pull Requests from trusted automation:
+
+**Automerge Workflow:**
+- Automatically approves PRs created by `Claude` or `github-actions[bot]`
+- Enables automerge for PRs with branches starting with `automated-update/` or `claude/`
+- Only merges when all required checks pass
+- Uses squash merge to keep history clean
+- Skips draft PRs (e.g., NGINX updates requiring SHA256 verification)
+
+**Auto Branch Cleanup:**
+- Automatically deletes branches after their PRs are merged
+- Keeps protected branches (`main`, `master`, `development`, etc.) safe
+- Prevents branch accumulation from automated updates
+
+For more details, see [Automerge Documentation](.github/AUTOMERGE.md).
+
 ### Script Validation
 All installer scripts are automatically validated on every push and pull request:
 - **Bash scripts**: Syntax validation with `bash -n` and linting with ShellCheck
