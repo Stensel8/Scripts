@@ -2,7 +2,7 @@
 #
 # Ansible Installer Script
 #
-# Installs Ansible 13.3.0 (ansible-core 2.20.2) in a Python 3.14 virtual environment.
+# Installs Ansible 13.5.0 (with its bundled ansible-core dependency) in a Python 3.14 virtual environment.
 # Note: 'ansible' is the community package; 'ansible-core' is the engine it ships with.
 # Supports Debian/Ubuntu (apt) and RHEL/Fedora (dnf).
 # Run as root.
@@ -20,7 +20,7 @@ NC='\033[0m'
 
 # === Settings ===
 REQ_PYTHON_VERSION="${REQ_PYTHON_VERSION:-3.14}"
-BUILD_PYTHON_VERSION="${BUILD_PYTHON_VERSION:-3.14.2}"
+BUILD_PYTHON_VERSION="${BUILD_PYTHON_VERSION:-3.14.3}"
 VENV_DIR="${VENV_DIR:-/opt/ansible-env}"
 FORCE_BUILD="${FORCE_BUILD:-false}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
@@ -141,12 +141,12 @@ else
 fi
 
 # === Install Ansible ===
-info "Installing Ansible 13.3.0 (community package, bundles ansible-core 2.20.2)..."
+info "Installing Ansible 13.5.0 (community package, bundles ansible-core~=2.20.4)..."
 (
     source "$VENV_DIR/bin/activate"
     command -v pip &>/dev/null || error "pip not found in venv."
     run pip install --upgrade pip setuptools wheel
-    run pip install ansible==13.3.0
+    run pip install ansible==13.5.0
 ) || error "Failed during venv operations."
 
 # === Global symlinks ===
