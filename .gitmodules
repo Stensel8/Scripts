@@ -1,0 +1,3 @@
+[submodule "TLS-tools/testssl.sh"]
+	path = TLS-tools/testssl.sh
+	url = https://github.com/testssl/testssl.sh
