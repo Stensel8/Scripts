@@ -1,71 +1,44 @@
 # NGINX Installer
 
-Scripts for building NGINX from source with my own hardened defaults.
-
-Builds with: OpenSSL 3.x, HTTP/2, HTTP/3 (QUIC), zstd compression, headers-more, and ACME module.
-
-## Quick start
+Builds NGINX from source with hardened defaults: OpenSSL 3.x, HTTP/2, HTTP/3 (QUIC), zstd compression, headers-more, and ACME module.
 
 ```bash
-# Install
 sudo ./nginx_installer.sh install
-
-# Remove
 sudo ./nginx_installer.sh remove
 ```
+
+PowerShell variant also available: `nginx_installer.ps1`
 
 ## Installed paths
 
 | Path | Purpose |
 |------|---------|
 | `/usr/sbin/nginx` | Binary |
-| `/etc/nginx/` | Configuration |
 | `/etc/nginx/nginx.conf` | Main config |
 | `/etc/nginx/ssl/` | TLS certificates |
 | `/etc/nginx/modules` | Symlink → `/usr/lib64/nginx/modules` |
-| `/usr/lib64/nginx/modules/` | Dynamic modules (`.so` files) |
+| `/usr/lib64/nginx/modules/` | Dynamic modules |
 | `/usr/share/nginx/html/` | Default web root |
-| `/var/log/nginx/` | Access and error logs |
-| `/var/cache/nginx/` | ACME state and nginx cache |
-| `/var/lib/nginx/` | Temp files (client body, proxy, etc.) |
+| `/var/log/nginx/` | Logs |
+| `/var/cache/nginx/` | ACME state and cache |
+| `/var/lib/nginx/` | Temp files |
 | `/etc/systemd/system/nginx.service` | Systemd service |
 
-## Managing the service
+## Service management
 
 ```bash
-sudo systemctl start nginx
-sudo systemctl stop nginx
-sudo systemctl reload nginx     # reload config without downtime
-sudo systemctl restart nginx
-sudo systemctl status nginx
+sudo systemctl {start|stop|reload|restart|status} nginx
 ```
 
-## Manual cleanup
-
-If you want to remove nginx without using the `remove` command, delete the following:
+## Manual removal
 
 ```bash
-# Stop and disable the service
-sudo systemctl stop nginx
-sudo systemctl disable nginx
+sudo systemctl stop nginx && sudo systemctl disable nginx
 sudo rm -f /etc/systemd/system/nginx.service
 sudo systemctl daemon-reload
-
-# Remove all installed files
-sudo rm -rf \
-    /usr/sbin/nginx \
-    /etc/nginx \
-    /usr/lib64/nginx \
-    /usr/share/nginx \
-    /var/log/nginx \
-    /var/cache/nginx \
-    /var/lib/nginx
-
-# Remove the nginx user
+sudo rm -rf /usr/sbin/nginx /etc/nginx /usr/lib64/nginx /usr/share/nginx \
+            /var/log/nginx /var/cache/nginx /var/lib/nginx
 sudo userdel nginx
-
-# Remove backups created by the installer (if any)
-sudo rm -rf /var/lib/nginx-backup-*
 ```
 
-Build directories are created in `/tmp/` and cleaned up automatically when the installer exits.
+Build directories are created in `/tmp/` and cleaned up automatically on exit.
