@@ -2,9 +2,7 @@
 #########################################################################
 # OpenSSH Hardened Configuration Installer
 #
-# Installs OpenSSH and applies a maximally hardened configuration.
-# Designed for modern systems where password authentication over SSH
-# is considered obsolete and insecure.
+# Ed25519-only · No password auth · Post-quantum hardened
 #
 # Philosophy:
 #   SSH keys are the only acceptable authentication method for remote
@@ -12,16 +10,14 @@
 #   never as SSH authentication.
 #
 #   Recommendation: store your SSH private keys in Bitwarden (SSH Agent
-#   feature) or another password manager. This gives you:
-#     - Encrypted key storage
-#     - Cross-device key sync
-#     - Audit log of key usage
-#     - Easy revocation
+#   feature) or another password manager.
 #
-#   External access: PKI auth only, FUTURE crypto policy (Fedora/RHEL)
-#   Internal access: PKI auth only, sudo for privilege escalation
-#
-# OpenSSH official website: https://www.openssh.com/
+#   Crypto policy:
+#     This script does not require or enforce Fedora/RHEL FUTURE crypto
+#     policy. It independently applies strong, post-quantum-aware settings
+#     that align with FUTURE in spirit — Ed25519, curve25519, AES-256,
+#     SHA-2 — while adding ML-KEM (Kyber) key exchange to mitigate
+#     store-now-decrypt-later attacks. No FUTURE policy activation needed.
 #########################################################################
 
 set -euo pipefail
@@ -71,7 +67,7 @@ print_header() {
     echo
     echo -e "${BOLD}OpenSSH Hardened Configuration Installer${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "Ed25519-only · No password auth · FUTURE crypto policy compatible"
+    echo -e "Ed25519-only · No password auth · Post-quantum hardened"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
 }
@@ -139,7 +135,7 @@ configure_ssh() {
     cat > "$tmp_config" << 'EOF'
 # =============================================================================
 # Hardened OpenSSH Server Configuration
-# Ed25519-only · No password auth · FUTURE crypto policy compatible
+# Ed25519-only · No password auth · Post-quantum hardened
 #
 # CVE mitigations:
 #   CVE-2023-51767 — Ed25519 only (no RSA)
@@ -158,8 +154,12 @@ configure_ssh() {
 #   Use passwords only for sudo (local privilege escalation), never for
 #   SSH authentication itself.
 #
-#   External access: PKI auth only, FUTURE crypto policy (Fedora/RHEL)
-#   Internal access: PKI auth only, sudo as the second layer
+#   Crypto policy:
+#     This script does not require or enforce Fedora/RHEL FUTURE crypto
+#     policy. It independently applies strong, post-quantum-aware settings
+#     that align with FUTURE in spirit — Ed25519, curve25519, AES-256,
+#     SHA-2 — while adding ML-KEM (Kyber) key exchange to mitigate
+#     store-now-decrypt-later attacks. No FUTURE policy activation needed.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -221,11 +221,16 @@ ClientAliveCountMax 2
 TCPKeepAlive no
 
 # -----------------------------------------------------------------------------
-# Cryptographic Algorithms — FUTURE policy compatible
-# Ed25519 + curve25519 + AES-256 + SHA-256+ only
+# Cryptographic Algorithms — Post-quantum hardened
+#
+# Goal: mitigate store-now-decrypt-later (SNDL) attacks by adding a
+# post-quantum key exchange (ML-KEM / FIPS 203) alongside classical
+# curve25519. This does not require FUTURE crypto policy to be active.
+#
+# Ed25519 + ML-KEM + curve25519 + AES-256 + SHA-2 only
 # No RSA, no ECDSA, no SHA-1, no AES-128
 # -----------------------------------------------------------------------------
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
+KexAlgorithms mlkem768x25519-sha256,curve25519-sha256,curve25519-sha256@libssh.org
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
 HostKeyAlgorithms ssh-ed25519
@@ -325,7 +330,8 @@ show_summary() {
     echo -e "${GREEN}✓${NC} $ssh_version installed"
     echo -e "${GREEN}✓${NC} Ed25519-only host key"
     echo -e "${GREEN}✓${NC} Password authentication disabled"
-    echo -e "${GREEN}✓${NC} FUTURE crypto policy compatible"
+    echo -e "${GREEN}✓${NC} Post-quantum KEX (ML-KEM / mlkem768x25519)"
+    echo -e "${GREEN}✓${NC} Aligned with FUTURE crypto policy (not required)"
     echo -e "${GREEN}✓${NC} All forwarding disabled"
     echo -e "${GREEN}✓${NC} CVE mitigations applied"
     systemctl is-active --quiet "$SSH_SERVICE" \
@@ -345,7 +351,6 @@ show_summary() {
     echo -e "1. Add your public key:  ${BLUE}ssh-copy-id user@host${NC}"
     echo -e "2. Test login:           ${BLUE}ssh user@${ip_hint}${NC}"
     echo -e "3. Store key in:         ${BLUE}Bitwarden SSH Agent${NC}"
-    echo -e "4. On Fedora/RHEL:       ${BLUE}sudo update-crypto-policies --set FUTURE${NC}"
     echo
     echo -e "${YELLOW}Emergency password access:${NC}"
     echo -e "Uncomment ${BLUE}PasswordAuthentication yes${NC} in $CONFIG_FILE"
