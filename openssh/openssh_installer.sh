@@ -322,7 +322,7 @@ test_configuration() {
 
 show_summary() {
     local ssh_version
-    ssh_version=$(sshd -V 2>&1 | grep -o 'OpenSSH_[^ ]*' || echo "unknown")
+    ssh_version=$(ssh -V 2>&1 | awk '{print $1}' | tr -d ',')
 
     echo
     echo -e "${BOLD}Summary${NC}"
@@ -427,7 +427,7 @@ verify() {
     local issues=0
 
     command -v sshd &>/dev/null \
-        && log_success "sshd found: $(sshd -V 2>&1 | grep -o 'OpenSSH_[^ ]*')" \
+        && log_success "sshd found: $ssh_version=$(ssh -V 2>&1 | awk '{print $1}' | tr -d ',')" \
         || { log_error "sshd not found"; ((issues++)); }
 
     [ -f "$CONFIG_FILE" ] && sshd -t 2>/dev/null \
