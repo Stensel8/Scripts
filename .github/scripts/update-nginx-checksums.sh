@@ -110,24 +110,24 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
         log_success "Updated Zlib SHA256 in nginx_installer.sh"
     fi
 
-    # Update PowerShell installer
+    # Update PowerShell installer ($Script:VAR = '...' met single quotes)
     if [ -n "$NGINX_SHA256" ]; then
-        sed -i "s/\$NGINX_SHA256 = \"[^\"]*\"/\$NGINX_SHA256 = \"$NGINX_SHA256\"/" nginx/nginx_installer.ps1
+        sed -i "s/\(\\\$Script:NGINX_SHA256\s*=\s*'\)[^']*'/\1$NGINX_SHA256'/" nginx/nginx_installer.ps1
         log_success "Updated NGINX SHA256 in nginx_installer.ps1"
     fi
 
     if [ -n "$OPENSSL_SHA256" ]; then
-        sed -i "s/\$OPENSSL_SHA256 = \"[^\"]*\"/\$OPENSSL_SHA256 = \"$OPENSSL_SHA256\"/" nginx/nginx_installer.ps1
+        sed -i "s/\(\\\$Script:OPENSSL_SHA256\s*=\s*'\)[^']*'/\1$OPENSSL_SHA256'/" nginx/nginx_installer.ps1
         log_success "Updated OpenSSL SHA256 in nginx_installer.ps1"
     fi
 
     if [ -n "$PCRE2_SHA256" ]; then
-        sed -i "s/\$PCRE2_SHA256 = \"[^\"]*\"/\$PCRE2_SHA256 = \"$PCRE2_SHA256\"/" nginx/nginx_installer.ps1
+        sed -i "s/\(\\\$Script:PCRE2_SHA256\s*=\s*'\)[^']*'/\1$PCRE2_SHA256'/" nginx/nginx_installer.ps1
         log_success "Updated PCRE2 SHA256 in nginx_installer.ps1"
     fi
 
     if [ -n "$ZLIB_SHA256" ]; then
-        sed -i "s/\$ZLIB_SHA256 = \"[^\"]*\"/\$ZLIB_SHA256 = \"$ZLIB_SHA256\"/" nginx/nginx_installer.ps1
+        sed -i "s/\(\\\$Script:ZLIB_SHA256\s*=\s*'\)[^']*'/\1$ZLIB_SHA256'/" nginx/nginx_installer.ps1
         log_success "Updated Zlib SHA256 in nginx_installer.ps1"
     fi
 

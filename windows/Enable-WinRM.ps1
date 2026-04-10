@@ -30,7 +30,7 @@ if (-not $existingListener) {
     winrm create winrm/config/Listener?Address=*+Transport=HTTP @{Port="5985"}
 } else {
     Write-Output "A WinRM HTTP listener is already configured."
-    break
+    return
 }
 
 # --- Step 4: Create Firewall Rule for WinRM HTTP (Port 5985) ---

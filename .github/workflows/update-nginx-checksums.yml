@@ -1,0 +1,97 @@
+name: Update nginx SHA256 checksums
+
+# Triggered automatically when Renovate opens/updates a PR that touches the nginx installers.
+# Downloads the new tarballs, calculates SHA256 hashes, and commits them back to the PR branch.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nginx/nginx_installer.sh'
+      - 'nginx/nginx_installer.ps1'
+
+permissions:
+  contents: write
+
+jobs:
+  update-checksums:
+    name: Recalculate SHA256 checksums
+    runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'renovate/')
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read versions from bash installer
+        id: versions
+        run: |
+          echo "nginx=$(grep -oP 'NGINX_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+          echo "openssl=$(grep -oP 'OPENSSL_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+          echo "pcre2=$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+          echo "zlib=$(grep -oP 'ZLIB_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+
+      - name: Download tarballs and calculate SHA256
+        id: checksums
+        run: |
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+
+          download_and_hash() {
+            local url="$1" file="$2"
+            if ! wget -q "$url" -O "$file"; then
+              echo "ERROR: Failed to download $url" >&2
+              exit 1
+            fi
+            sha256sum "$file" | awk '{print $1}'
+          }
+
+          NGINX_SHA=$(download_and_hash \
+            "https://github.com/nginx/nginx/releases/download/release-${{ steps.versions.outputs.nginx }}/nginx-${{ steps.versions.outputs.nginx }}.tar.gz" \
+            "nginx.tar.gz")
+
+          OPENSSL_SHA=$(download_and_hash \
+            "https://github.com/openssl/openssl/releases/download/openssl-${{ steps.versions.outputs.openssl }}/openssl-${{ steps.versions.outputs.openssl }}.tar.gz" \
+            "openssl.tar.gz")
+
+          PCRE2_SHA=$(download_and_hash \
+            "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${{ steps.versions.outputs.pcre2 }}/pcre2-${{ steps.versions.outputs.pcre2 }}.tar.gz" \
+            "pcre2.tar.gz")
+
+          ZLIB_SHA=$(download_and_hash \
+            "https://github.com/madler/zlib/releases/download/v${{ steps.versions.outputs.zlib }}/zlib-${{ steps.versions.outputs.zlib }}.tar.gz" \
+            "zlib.tar.gz")
+
+          echo "nginx=$NGINX_SHA"     >> $GITHUB_OUTPUT
+          echo "openssl=$OPENSSL_SHA" >> $GITHUB_OUTPUT
+          echo "pcre2=$PCRE2_SHA"     >> $GITHUB_OUTPUT
+          echo "zlib=$ZLIB_SHA"       >> $GITHUB_OUTPUT
+
+      - name: Update checksums in bash installer
+        run: |
+          sed -i "s/NGINX_SHA256=\"[^\"]*\"/NGINX_SHA256=\"${{ steps.checksums.outputs.nginx }}\"/"     nginx/nginx_installer.sh
+          sed -i "s/OPENSSL_SHA256=\"[^\"]*\"/OPENSSL_SHA256=\"${{ steps.checksums.outputs.openssl }}\"/" nginx/nginx_installer.sh
+          sed -i "s/PCRE2_SHA256=\"[^\"]*\"/PCRE2_SHA256=\"${{ steps.checksums.outputs.pcre2 }}\"/"     nginx/nginx_installer.sh
+          sed -i "s/ZLIB_SHA256=\"[^\"]*\"/ZLIB_SHA256=\"${{ steps.checksums.outputs.zlib }}\"/"         nginx/nginx_installer.sh
+
+      - name: Update checksums in PowerShell installer
+        run: |
+          sed -i "s/\(\$Script:NGINX_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.nginx }}'/"     nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:OPENSSL_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.openssl }}'/" nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:PCRE2_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.pcre2 }}'/"     nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:ZLIB_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.zlib }}'/"         nginx/nginx_installer.ps1
+
+      - name: Commit updated checksums
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nginx/nginx_installer.sh nginx/nginx_installer.ps1
+          if git diff --staged --quiet; then
+            echo "Checksums are already up to date, nothing to commit."
+          else
+            git commit -m "chore: update nginx dependency SHA256 checksums"
+            git push
+          fi

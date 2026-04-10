@@ -1,15 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base"
+    "config:recommended"
   ],
-  "description": "Renovate configuration for Scripts repository - Alternative to Dependabot",
-  "enabled": false,
-  "enabledManagers": [
-    "github-actions",
-    "dockerfile",
-    "docker-compose"
-  ],
+  "description": "Renovate handles all version updates for this repository",
   "schedule": [
     "every weekend"
   ],
@@ -24,34 +18,132 @@
     "Stensel8"
   ],
   "prConcurrentLimit": 5,
-  "prCreation": "immediate",
-  "prHourlyLimit": 0,
   "rebaseWhen": "behind-base-branch",
   "semanticCommits": "enabled",
-  "commitMessagePrefix": "deps:",
-  "commitMessageAction": "update",
-  "commitMessageTopic": "{{depName}}",
   "packageRules": [
     {
-      "description": "GitHub Actions updates",
-      "matchManagers": [
-        "github-actions"
-      ],
+      "matchManagers": ["github-actions"],
       "automerge": false,
       "semanticCommitType": "ci",
-      "commitMessagePrefix": "ci:",
       "groupName": "GitHub Actions"
     },
     {
-      "description": "Docker image updates",
-      "matchManagers": [
-        "dockerfile",
-        "docker-compose"
-      ],
+      "matchManagers": ["dockerfile", "docker-compose"],
       "automerge": false,
       "semanticCommitType": "deps",
-      "commitMessagePrefix": "deps:",
       "groupName": "Docker"
+    },
+    {
+      "description": "Groepeer alle nginx installer-afhankelijkheden in één PR",
+      "matchManagers": ["regex"],
+      "matchFileNames": ["nginx/**"],
+      "automerge": false,
+      "semanticCommitType": "deps",
+      "groupName": "nginx installer deps"
+    },
+    {
+      "matchManagers": ["regex"],
+      "matchFileNames": ["ansible/**"],
+      "automerge": false,
+      "semanticCommitType": "deps",
+      "groupName": "ansible installer deps"
+    },
+    {
+      "matchManagers": ["regex"],
+      "matchFileNames": ["kubernetes/**"],
+      "automerge": false,
+      "semanticCommitType": "deps",
+      "groupName": "kubernetes installer deps"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "NGINX versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["NGINX_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "nginx/nginx",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^release-(?<version>.+)$"
+    },
+    {
+      "description": "NGINX versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:NGINX_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "nginx/nginx",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^release-(?<version>.+)$"
+    },
+    {
+      "description": "OpenSSL versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["OPENSSL_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "openssl/openssl",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^openssl-(?<version>.+)$"
+    },
+    {
+      "description": "OpenSSL versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:OPENSSL_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "openssl/openssl",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^openssl-(?<version>.+)$"
+    },
+    {
+      "description": "PCRE2 versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["PCRE2_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "PCRE2Project/pcre2",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^pcre2-(?<version>.+)$"
+    },
+    {
+      "description": "PCRE2 versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:PCRE2_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "PCRE2Project/pcre2",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^pcre2-(?<version>.+)$"
+    },
+    {
+      "description": "Zlib versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["ZLIB_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "madler/zlib",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "Zlib versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:ZLIB_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "madler/zlib",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "Ansible versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^ansible/ansible_installer\\.sh$"],
+      "matchStrings": ["pip install ansible==(?<currentValue>[0-9.]+)"],
+      "depNameTemplate": "ansible",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "Kubernetes versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^kubernetes/kubernetes_installer\\.sh$"],
+      "matchStrings": ["K8S_VERSION:-(?<currentValue>v[0-9.]+)"],
+      "depNameTemplate": "kubernetes/kubernetes",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "vulnerabilityAlerts": {
