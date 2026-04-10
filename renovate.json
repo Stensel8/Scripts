@@ -20,16 +20,20 @@
   "prConcurrentLimit": 5,
   "rebaseWhen": "behind-base-branch",
   "semanticCommits": "enabled",
+  "automerge": true,
+  "automergeType": "pr",
+  "gitIgnoredAuthors": [
+    "github-actions[bot]@users.noreply.github.com",
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  ],
   "packageRules": [
     {
       "matchManagers": ["github-actions"],
-      "automerge": false,
       "semanticCommitType": "ci",
       "groupName": "GitHub Actions"
     },
     {
       "matchManagers": ["dockerfile", "docker-compose"],
-      "automerge": false,
       "semanticCommitType": "deps",
       "groupName": "Docker"
     },
@@ -37,21 +41,18 @@
       "description": "Groepeer alle nginx installer-afhankelijkheden in één PR",
       "matchManagers": ["regex"],
       "matchFileNames": ["nginx/**"],
-      "automerge": false,
       "semanticCommitType": "deps",
       "groupName": "nginx installer deps"
     },
     {
       "matchManagers": ["regex"],
       "matchFileNames": ["ansible/**"],
-      "automerge": false,
       "semanticCommitType": "deps",
       "groupName": "ansible installer deps"
     },
     {
       "matchManagers": ["regex"],
       "matchFileNames": ["kubernetes/**"],
-      "automerge": false,
       "semanticCommitType": "deps",
       "groupName": "kubernetes installer deps"
     }
