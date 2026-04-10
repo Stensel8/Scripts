@@ -5,7 +5,7 @@
   ],
   "description": "Renovate handles all version updates for this repository",
   "schedule": [
-    "every weekend"
+    "at any time"
   ],
   "labels": [
     "dependencies",
@@ -126,6 +126,58 @@
       "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
       "matchStrings": ["\\$Script:ZLIB_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
       "depNameTemplate": "madler/zlib",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "headers-more-nginx-module versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["HEADERS_MORE_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "openresty/headers-more-nginx-module",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "headers-more-nginx-module versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:HEADERS_MORE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "openresty/headers-more-nginx-module",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "zstd-nginx-module versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["ZSTD_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "tokers/zstd-nginx-module",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "zstd-nginx-module versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:ZSTD_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "tokers/zstd-nginx-module",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "nginx-acme versie in bash installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.sh$"],
+      "matchStrings": ["ACME_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "nginx/nginx-acme",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "nginx-acme versie in PowerShell installer",
+      "customType": "regex",
+      "fileMatch": ["^nginx/nginx_installer\\.ps1$"],
+      "matchStrings": ["\\$Script:ACME_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"],
+      "depNameTemplate": "nginx/nginx-acme",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"
     },

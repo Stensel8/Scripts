@@ -28,10 +28,13 @@ jobs:
       - name: Read versions from bash installer
         id: versions
         run: |
-          echo "nginx=$(grep -oP 'NGINX_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
-          echo "openssl=$(grep -oP 'OPENSSL_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
-          echo "pcre2=$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
-          echo "zlib=$(grep -oP 'ZLIB_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+          echo "nginx=$(grep -oP 'NGINX_VERSION="\K[^"]+' nginx/nginx_installer.sh)"               >> $GITHUB_OUTPUT
+          echo "openssl=$(grep -oP 'OPENSSL_VERSION="\K[^"]+' nginx/nginx_installer.sh)"           >> $GITHUB_OUTPUT
+          echo "pcre2=$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)"               >> $GITHUB_OUTPUT
+          echo "zlib=$(grep -oP 'ZLIB_VERSION="\K[^"]+' nginx/nginx_installer.sh)"                 >> $GITHUB_OUTPUT
+          echo "headers_more=$(grep -oP 'HEADERS_MORE_VERSION="\K[^"]+' nginx/nginx_installer.sh)" >> $GITHUB_OUTPUT
+          echo "zstd=$(grep -oP 'ZSTD_MODULE_VERSION="\K[^"]+' nginx/nginx_installer.sh)"          >> $GITHUB_OUTPUT
+          echo "acme=$(grep -oP 'ACME_MODULE_VERSION="\K[^"]+' nginx/nginx_installer.sh)"          >> $GITHUB_OUTPUT
 
       - name: Download tarballs and calculate SHA256
         id: checksums
@@ -65,24 +68,45 @@ jobs:
             "https://github.com/madler/zlib/releases/download/v${{ steps.versions.outputs.zlib }}/zlib-${{ steps.versions.outputs.zlib }}.tar.gz" \
             "zlib.tar.gz")
 
-          echo "nginx=$NGINX_SHA"     >> $GITHUB_OUTPUT
-          echo "openssl=$OPENSSL_SHA" >> $GITHUB_OUTPUT
-          echo "pcre2=$PCRE2_SHA"     >> $GITHUB_OUTPUT
-          echo "zlib=$ZLIB_SHA"       >> $GITHUB_OUTPUT
+          HEADERS_MORE_SHA=$(download_and_hash \
+            "https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v${{ steps.versions.outputs.headers_more }}.tar.gz" \
+            "headers-more.tar.gz")
+
+          ZSTD_SHA=$(download_and_hash \
+            "https://github.com/tokers/zstd-nginx-module/archive/refs/tags/${{ steps.versions.outputs.zstd }}.tar.gz" \
+            "zstd.tar.gz")
+
+          ACME_SHA=$(download_and_hash \
+            "https://github.com/nginx/nginx-acme/releases/download/v${{ steps.versions.outputs.acme }}/nginx-acme-${{ steps.versions.outputs.acme }}.tar.gz" \
+            "acme.tar.gz")
+
+          echo "nginx=$NGINX_SHA"               >> $GITHUB_OUTPUT
+          echo "openssl=$OPENSSL_SHA"           >> $GITHUB_OUTPUT
+          echo "pcre2=$PCRE2_SHA"               >> $GITHUB_OUTPUT
+          echo "zlib=$ZLIB_SHA"                 >> $GITHUB_OUTPUT
+          echo "headers_more=$HEADERS_MORE_SHA" >> $GITHUB_OUTPUT
+          echo "zstd=$ZSTD_SHA"                 >> $GITHUB_OUTPUT
+          echo "acme=$ACME_SHA"                 >> $GITHUB_OUTPUT
 
       - name: Update checksums in bash installer
         run: |
-          sed -i "s/NGINX_SHA256=\"[^\"]*\"/NGINX_SHA256=\"${{ steps.checksums.outputs.nginx }}\"/"     nginx/nginx_installer.sh
-          sed -i "s/OPENSSL_SHA256=\"[^\"]*\"/OPENSSL_SHA256=\"${{ steps.checksums.outputs.openssl }}\"/" nginx/nginx_installer.sh
-          sed -i "s/PCRE2_SHA256=\"[^\"]*\"/PCRE2_SHA256=\"${{ steps.checksums.outputs.pcre2 }}\"/"     nginx/nginx_installer.sh
-          sed -i "s/ZLIB_SHA256=\"[^\"]*\"/ZLIB_SHA256=\"${{ steps.checksums.outputs.zlib }}\"/"         nginx/nginx_installer.sh
+          sed -i "s/NGINX_SHA256=\"[^\"]*\"/NGINX_SHA256=\"${{ steps.checksums.outputs.nginx }}\"/"                         nginx/nginx_installer.sh
+          sed -i "s/OPENSSL_SHA256=\"[^\"]*\"/OPENSSL_SHA256=\"${{ steps.checksums.outputs.openssl }}\"/"                   nginx/nginx_installer.sh
+          sed -i "s/PCRE2_SHA256=\"[^\"]*\"/PCRE2_SHA256=\"${{ steps.checksums.outputs.pcre2 }}\"/"                         nginx/nginx_installer.sh
+          sed -i "s/ZLIB_SHA256=\"[^\"]*\"/ZLIB_SHA256=\"${{ steps.checksums.outputs.zlib }}\"/"                             nginx/nginx_installer.sh
+          sed -i "s/HEADERS_MORE_SHA256=\"[^\"]*\"/HEADERS_MORE_SHA256=\"${{ steps.checksums.outputs.headers_more }}\"/"     nginx/nginx_installer.sh
+          sed -i "s/ZSTD_MODULE_SHA256=\"[^\"]*\"/ZSTD_MODULE_SHA256=\"${{ steps.checksums.outputs.zstd }}\"/"               nginx/nginx_installer.sh
+          sed -i "s/ACME_MODULE_SHA256=\"[^\"]*\"/ACME_MODULE_SHA256=\"${{ steps.checksums.outputs.acme }}\"/"               nginx/nginx_installer.sh
 
       - name: Update checksums in PowerShell installer
         run: |
-          sed -i "s/\(\$Script:NGINX_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.nginx }}'/"     nginx/nginx_installer.ps1
-          sed -i "s/\(\$Script:OPENSSL_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.openssl }}'/" nginx/nginx_installer.ps1
-          sed -i "s/\(\$Script:PCRE2_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.pcre2 }}'/"     nginx/nginx_installer.ps1
-          sed -i "s/\(\$Script:ZLIB_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.zlib }}'/"         nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:NGINX_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.nginx }}'/"                       nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:OPENSSL_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.openssl }}'/"                   nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:PCRE2_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.pcre2 }}'/"                       nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:ZLIB_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.zlib }}'/"                         nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:HEADERS_MORE_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.headers_more }}'/"         nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:ZSTD_MODULE_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.zstd }}'/"                 nginx/nginx_installer.ps1
+          sed -i "s/\(\$Script:ACME_MODULE_SHA256\s*=\s*'\)[^']*'/\1${{ steps.checksums.outputs.acme }}'/"                 nginx/nginx_installer.ps1
 
       - name: Commit updated checksums
         run: |
