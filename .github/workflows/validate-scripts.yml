@@ -1,5 +1,8 @@
 name: Validate Installer Scripts
 
+permissions:
+  contents: read
+
 # This workflow validates the syntax and basic structure of installer scripts
 # to catch issues early before they're deployed to production systems
 
