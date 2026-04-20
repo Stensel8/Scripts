@@ -51,7 +51,7 @@ ZSTD_MODULE_SHA256="707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e1
 
 # ACME Module
 ACME_MODULE_VERSION="0.4.0"
-ACME_MODULE_SHA256="be3d3d10f042930a3bf348731698eadb7003d224a863c53b719ccd28721572c3"
+ACME_MODULE_SHA256="5da9b5db28933ccd34a52e1069a4b920526f061ae923f80f1582cc5cad3d6bf3"
 
 # ============================================================================
 # Static Configuration
