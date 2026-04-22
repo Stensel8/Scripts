@@ -852,7 +852,7 @@ function Test-RunningWebServers {
     $portsInUse = [System.Collections.Generic.List[string]]::new()
 
     foreach ($port in @(80, 443)) {
-        $procId = (bash -c "lsof -ti :$port 2>/dev/null | head -n1").Trim()
+        $procId = (bash -c "lsof -ti :$port 2>/dev/null | head -n1" 2>$null)?.Trim()
         if ($procId) {
             $proc = (bash -c "ps -p $procId -o comm= 2>/dev/null || echo unknown").Trim()
             $portsInUse.Add("$port ($proc)")
