@@ -247,13 +247,12 @@
       "datasourceTemplate": "py"
     },
     {
-      "description": "vagrant-vmware-utility in Windows installer",
+      "description": "Vagrant versie in Windows installer",
       "customType": "regex",
       "managerFilePatterns": ["/^windows/Install-VagrantVMware\\.ps1$/"],
-      "matchStrings": ["vagrant-vmware-utility/(?<currentValue>[0-9.]+)/"],
-      "depNameTemplate": "vagrant-vmware-utility",
-      "datasourceTemplate": null,
-      "registryUrlTemplate": "https://releases.hashicorp.com/vagrant-vmware-utility"
+      "matchStrings": ["\\$VAGRANT_VERSION\\s*=\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "Hashicorp.Vagrant",
+      "datasourceTemplate": "winget"
     }
   ],
   "vulnerabilityAlerts": {
