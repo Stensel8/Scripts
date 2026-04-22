@@ -252,7 +252,8 @@
       "managerFilePatterns": ["/^windows/Install-VagrantVMware\\.ps1$/"],
       "matchStrings": ["vagrant-vmware-utility/(?<currentValue>[0-9.]+)/"],
       "depNameTemplate": "vagrant-vmware-utility",
-      "datasourceTemplate": "hashicorp"
+      "datasourceTemplate": null,
+      "registryUrlTemplate": "https://releases.hashicorp.com/vagrant-vmware-utility"
     }
   ],
   "vulnerabilityAlerts": {
