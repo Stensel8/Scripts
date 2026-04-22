@@ -6,7 +6,7 @@ Tools for testing TLS/SSL configurations and HTTP security features.
 
 Cross-platform PowerShell script that tests TLS versions, HTTP versions, compression, QUIC, and HSTS using a self-contained cURL binary.
 
-**Requirements:** PowerShell 7.5.0+
+**Requirements:** PowerShell 7.5+
 
 ```powershell
 .\TLS-checker.ps1 -Domain "example.com" -TestType All
@@ -17,7 +17,7 @@ Cross-platform PowerShell script that tests TLS versions, HTTP versions, compres
 
 Really strong TLS/SSL scanner. This one is included as a submodule from a project that I like. It scans ciphers, protocols, certificates, and vulnerabilities.
 
-Currently, the Git submodule is pinned at v3.2.3. If missing after cloning, run:
+Currently, the Git submodule is pinned at a specific version. If missing after cloning, run:
 
 ```bash
 git submodule update --init

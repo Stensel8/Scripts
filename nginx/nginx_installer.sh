@@ -6,7 +6,7 @@ set -euo pipefail
 # ============================================================================
 #
 # Description:
-#   Builds and installs NGINX with OpenSSL 3.6, HTTP/3, zstd compression,
+#   Builds and installs NGINX with OpenSSL, HTTP/3, zstd compression,
 #   and ACME support on Linux.
 #
 # Usage:
@@ -156,8 +156,8 @@ Install-Dependencies() {
             dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake >/dev/null 2>&1
             ;;
         pacman)
-            if ! pacman -Sy --noconfirm base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf >/dev/null 2>&1; then
-                Stop-Script "pacman install failed. Please install manually: pacman -S base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf. Resolve conflicts (e.g., zlib vs zlib-ng-compat) or select providers (e.g., rust for cargo)."
+            if ! pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf >/dev/null 2>&1; then
+                Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
             fi
             ;;
         *)
@@ -304,7 +304,9 @@ Build-Nginx() {
                 use_system_ssl=true
                 Write-Log WARN "OpenSSL build failed"
             else
-                make install_sw 2>&1 | grep -v '^DEBUG:' || true
+                if ! make install_sw >/dev/null 2>&1; then
+                    Stop-Script "OpenSSL make install_sw failed"
+                fi
                 ssl_opt="--with-openssl=$BUILD_DIR/openssl"
                 Write-Log INFO "OpenSSL built successfully"
             fi
@@ -331,14 +333,9 @@ Build-Nginx() {
     export CC=gcc
     
     # Verify libzstd availability
-    if command -v ldconfig >/dev/null 2>&1; then
-        if ! ldconfig -p 2>/dev/null | grep -q "libzstd.so"; then
-            Stop-Script "Shared libzstd not found. Install libzstd-dev/devel"
-        fi
-    else
-        if [[ ! -f /usr/lib/libzstd.so && ! -f /usr/lib64/libzstd.so && ! -f /usr/local/lib/libzstd.so ]]; then
-            Stop-Script "Shared libzstd not found"
-        fi
+    if [[ ! -f /usr/lib/libzstd.so && ! -f /usr/lib/libzstd.so.1 && 
+          ! -f /usr/lib64/libzstd.so && ! -f /usr/lib64/libzstd.so.1 ]]; then
+        Stop-Script "Shared libzstd not found. Install libzstd-dev/devel"
     fi
     
     export LDFLAGS="-lzstd"
@@ -572,7 +569,8 @@ http {
     tcp_nopush      on;
     tcp_nodelay     on;
     keepalive_timeout  65;
-    types_hash_max_size 2048;
+    types_hash_max_size 4096;
+    types_hash_bucket_size 128;
 
     # Gzip compression
     gzip  on;
@@ -671,6 +669,9 @@ Install-Nginx() {
         Stop-Script "Nginx install failed"
     fi
     
+    # Verify nginx binary exists
+    [[ -x /usr/sbin/nginx ]] || Stop-Script "NGINX binary not found after install"
+    
     # Create directories
     mkdir -p /etc/nginx/{conf.d,sites-available,sites-enabled}
     mkdir -p "${NGINX_MODULES_PATH}"
@@ -697,6 +698,9 @@ Install-Nginx() {
     fi
 
     chown -R nginx:nginx /var/log/nginx /var/cache/nginx /var/lib/nginx
+    chown root:nginx /etc/nginx/ssl
+    chmod 640 /etc/nginx/ssl/nginx.key
+    chmod 644 /etc/nginx/ssl/nginx.crt
     chmod 755 /etc/nginx/conf.d "${NGINX_MODULES_PATH}"
     
     # Create systemd service

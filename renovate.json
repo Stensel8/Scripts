@@ -229,6 +229,30 @@
       "matchStrings": ["K8S_VERSION:-(?<currentValue>v[0-9.]+)"],
       "depNameTemplate": "kubernetes/kubernetes",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "Request Python versie in ansible installer",
+      "customType": "regex",
+      "managerFilePatterns": ["/^ansible/ansible_installer\\.sh$/"],
+      "matchStrings": ["REQ_PYTHON_VERSION=\"(?<currentValue>[0-9.]+)\""] ,
+      "depNameTemplate": "python",
+      "datasourceTemplate": "py"
+    },
+    {
+      "description": "Build Python versie in ansible installer",
+      "customType": "regex",
+      "managerFilePatterns": ["/^ansible/ansible_installer\\.sh$/"],
+      "matchStrings": ["BUILD_PYTHON_VERSION=\"(?<currentValue>[0-9.]+)\""] ,
+      "depNameTemplate": "python",
+      "datasourceTemplate": "py"
+    },
+    {
+      "description": "vagrant-vmware-utility in Windows installer",
+      "customType": "regex",
+      "managerFilePatterns": ["/^windows/Install-VagrantVMware\\.ps1$/"],
+      "matchStrings": ["vagrant-vmware-utility/(?<currentValue>[0-9.]+)/"],
+      "depNameTemplate": "hashicorp/vagrant-vmware-utility",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "vulnerabilityAlerts": {

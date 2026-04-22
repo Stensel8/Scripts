@@ -3,7 +3,7 @@
     NGINX Installer Script for Linux (PowerShell)
 
 .DESCRIPTION
-    Builds and installs NGINX with OpenSSL 3.6, HTTP/3, zstd compression,
+    Builds and installs NGINX with OpenSSL, HTTP/3, zstd compression,
     and ACME support on Linux.
 
 .PARAMETER Command
@@ -192,7 +192,9 @@ function Install-Dependencies {
             & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
         'pacman' {
-            & pacman -Syu --noconfirm base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf 2>&1 | Out-Null
+            if (-not (& pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf 2>&1 | Out-Null)) {
+                Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
+            }
         }
         default {
             Stop-Script 'Unsupported package manager. Only apt, dnf and pacman are supported.'
@@ -381,13 +383,10 @@ function Build-Nginx {
     Push-Location $nginxSrc
 
     # Verify libzstd availability
-    $ldconfigOut = bash -lc 'ldconfig -p 2>/dev/null || true'
-    if (-not ($ldconfigOut -match 'libzstd\.so')) {
-        $zstdPaths = @('/usr/lib/libzstd.so', '/usr/lib64/libzstd.so', '/usr/local/lib/libzstd.so')
-        $found = $zstdPaths | Where-Object { Test-Path $_ }
-        if (-not $found) {
-            Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
-        }
+    $zstdPaths = @('/usr/lib/libzstd.so', '/usr/lib/libzstd.so.1', '/usr/lib64/libzstd.so', '/usr/lib64/libzstd.so.1', '/usr/local/lib/libzstd.so')
+    $found = $zstdPaths | Where-Object { Test-Path $_ }
+    if (-not $found) {
+        Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
     }
 
     $pcre2Path   = Join-Path $Script:BUILD_DIR 'pcre2'
@@ -621,7 +620,8 @@ http {
     tcp_nopush      on;
     tcp_nodelay     on;
     keepalive_timeout  65;
-    types_hash_max_size 2048;
+    types_hash_max_size 4096;
+    types_hash_bucket_size 128;
 
     # Gzip compression
     gzip  on;
@@ -751,8 +751,10 @@ function Install-Nginx {
     }
 
     # Install dynamic modules
-    Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination $Script:NGINX_MODULES_PATH -Force -ErrorAction SilentlyContinue
-    Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination $Script:NGINX_MODULES_PATH -Force -ErrorAction SilentlyContinue
+    Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination $Script:NGINX_MODULES_PATH -Force
+    if ($LASTEXITCODE -ne 0) { Stop-Script "Failed to copy NGINX modules" }
+    Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination $Script:NGINX_MODULES_PATH -Force
+    if ($LASTEXITCODE -ne 0) { Stop-Script "Failed to copy ACME module" }
 
     # Install configuration files
     Install-HtmlFiles
@@ -763,6 +765,9 @@ function Install-Nginx {
     bash -c 'id nginx 2>/dev/null || useradd -r -s /sbin/nologin nginx' | Out-Null
 
     bash -c "chown -R nginx:nginx /var/log/nginx /var/cache/nginx /var/lib/nginx" | Out-Null
+    bash -c "chown root:nginx /etc/nginx/ssl" | Out-Null
+    bash -c "chmod 640 /etc/nginx/ssl/nginx.key" | Out-Null
+    bash -c "chmod 644 /etc/nginx/ssl/nginx.crt" | Out-Null
     bash -c "chmod 755 /etc/nginx/conf.d '$Script:NGINX_MODULES_PATH'" | Out-Null
 
     # Create systemd service
@@ -906,10 +911,4 @@ try {
     }
 } finally {
     Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
-}
-nue
-}
-  Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
-}
-nue
 }
