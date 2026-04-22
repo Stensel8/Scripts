@@ -156,6 +156,8 @@ function Get-PkgMgr {
         return 'apt'
     } elseif (Get-Command dnf -ErrorAction SilentlyContinue) {
         return 'dnf'
+    } elseif (Get-Command pacman -ErrorAction SilentlyContinue) {
+        return 'pacman'
     } else {
         return 'unknown'
     }
@@ -189,8 +191,11 @@ function Install-Dependencies {
         'dnf' {
             & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
+        'pacman' {
+            & pacman -Syu --noconfirm base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf 2>&1 | Out-Null
+        }
         default {
-            Stop-Script 'Unsupported package manager. Only apt and dnf are supported.'
+            Stop-Script 'Unsupported package manager. Only apt, dnf and pacman are supported.'
         }
     }
 
@@ -226,6 +231,10 @@ function Update-SystemPackages {
             $dnfOutput = & dnf upgrade -y -q 2>&1 | Select-String -Pattern '(Complete|Error|Failed)'
             if ($LASTEXITCODE -ne 0) { Stop-Script 'dnf upgrade failed' }
             if ($dnfOutput) { $dnfOutput | Out-Host }
+        }
+        'pacman' {
+            & pacman -Syu --noconfirm 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Stop-Script 'pacman upgrade failed' }
         }
         default {
             Write-Log 'WARN' 'Unable to detect package manager'
@@ -360,6 +369,7 @@ function Build-Nginx {
         switch ($mgr) {
             'apt' { & apt-get install -y libssl-dev 2>&1 | Out-Null }
             'dnf' { & dnf install -y openssl-devel 2>&1 | Out-Null }
+            'pacman' { & pacman -Sy --noconfirm openssl 2>&1 | Out-Null }
         }
         Write-Log 'INFO' 'Using system OpenSSL'
     }
@@ -548,6 +558,7 @@ function New-NginxSelfSignedCertificate {
         switch ($mgr) {
             'apt' { & apt-get install -y openssl 2>&1 | Out-Null }
             'dnf' { & dnf install -y openssl 2>&1 | Out-Null }
+            'pacman' { & pacman -Sy --noconfirm openssl 2>&1 | Out-Null }
         }
         $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
     }
@@ -895,4 +906,10 @@ try {
     }
 } finally {
     Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
+}
+nue
+}
+  Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
+}
+nue
 }

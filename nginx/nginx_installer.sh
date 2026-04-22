@@ -126,6 +126,8 @@ Detect-PkgMgr() {
         echo "apt"
     elif command -v dnf >/dev/null 2>&1; then
         echo "dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
     else
         echo "unknown"
     fi
@@ -153,8 +155,13 @@ Install-Dependencies() {
         dnf)
             dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake >/dev/null 2>&1
             ;;
+        pacman)
+            if ! pacman -Sy --noconfirm base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf >/dev/null 2>&1; then
+                Stop-Script "pacman install failed. Please install manually: pacman -S base-devel pcre2 zlib zstd curl clang gawk cmake cargo pkgconf. Resolve conflicts (e.g., zlib vs zlib-ng-compat) or select providers (e.g., rust for cargo)."
+            fi
+            ;;
         *)
-            Stop-Script "Unsupported package manager. Only apt and dnf are supported."
+            Stop-Script "Unsupported package manager. Only apt, dnf and pacman are supported."
             ;;
     esac
     
@@ -187,6 +194,9 @@ Update-SystemPackages() {
             if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
                 Stop-Script "dnf upgrade failed"
             fi
+            ;;
+        pacman)
+            pacman -Syu --noconfirm >/dev/null 2>&1 || Write-Log WARN "pacman upgrade failed"
             ;;
         *)
             Write-Log WARN "Unable to detect package manager"
@@ -308,6 +318,7 @@ Build-Nginx() {
         case $mgr in
             apt) apt-get install -y libssl-dev >/dev/null 2>&1 ;;
             dnf) dnf install -y openssl-devel >/dev/null 2>&1 ;;
+            pacman) pacman -Sy --noconfirm openssl >/dev/null 2>&1 ;;
         esac
         Write-Log INFO "Using system OpenSSL"
     fi
@@ -483,6 +494,7 @@ New-SelfSignedCertificate() {
         case $mgr in
             apt) apt-get install -y openssl >/dev/null 2>&1 ;;
             dnf) dnf install -y openssl >/dev/null 2>&1 ;;
+            pacman) pacman -Sy --noconfirm openssl >/dev/null 2>&1 ;;
         esac
         ssl_bin=$(command -v openssl || true)
     fi
