@@ -251,7 +251,7 @@
       "customType": "regex",
       "managerFilePatterns": ["/^windows/Install-VagrantVMware\\.ps1$/"],
       "matchStrings": ["\\$VAGRANT_VERSION\\s*=\\s*\"(?<currentValue>[^\"]+)\""],
-      "depNameTemplate": "Hashicorp.Vagrant",
+      "depNameTemplate": "hashicorp/vagrant",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"
     }
