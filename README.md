@@ -31,7 +31,7 @@ pwsh ./<tool>_installer.ps1
 | `podman/` | `podman_installer.sh` | Linux | Distribution repositories |
 | `terraform/` | `terraform_installer.sh` | Linux | HashiCorp repositories |
 | `TLS-tools/` | `TLS-checker.ps1` | Cross-platform | Tests TLS versions, HTTP versions, QUIC, HSTS, compression |
-| `TLS-tools/` | `testssl.sh` (submodule) | Linux | Comprehensive TLS/SSL scanner by Dirk Wetter — pinned at v3.2.3 |
+| `TLS-tools/` | `testssl.sh` (submodule) | Linux | Comprehensive TLS/SSL scanner by Dirk Wetter — pinned at a specific version |
 | `windows/` | `Enable-WinRM.ps1` | Windows | Configures WinRM for remote management |
 | `windows/` | `Get-InstalledSoftware.ps1` | Windows | Lists installed software from registry |
 | `windows/` | `configure-Windows-VM.ps1` | Windows | Disables unnecessary services for VMs |

@@ -4,7 +4,7 @@
   TLS & HTTP feature tester using static cURL binary.
 .DESCRIPTION
   Downloads a self-contained curl if needed, then tests compression, TLS versions,
-  HTTP versions, QUIC, and HSTS for given domains. Requires PowerShell 7.5.0 or higher.
+  HTTP versions, QUIC, and HSTS for given domains. Requires PowerShell 7.5 or higher.
 .PARAMETER Domain
   The domain to test (can be provided interactively)
 .PARAMETER TestType
@@ -34,7 +34,7 @@
 .EXAMPLE
   .\TLS-checker.ps1 -Domain "example.com" -TestType "All" -PreferMusl
 .NOTES
-  Requires: PowerShell 7.5.0+
+  Requires: PowerShell 7.5+
   
   If you experience issues on Linux, try running with -Verbose to see detailed debugging information.
   This will show platform detection, curl binary selection, and connection attempts.

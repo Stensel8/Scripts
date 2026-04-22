@@ -2,7 +2,7 @@
 #
 # Ansible Installer Script
 #
-# Installs Ansible 13.5.0 (with its bundled ansible-core dependency) in a Python 3.14 virtual environment.
+# Installs Ansible (with its bundled ansible-core dependency) in a Python virtual environment.
 # Note: 'ansible' is the community package; 'ansible-core' is the engine it ships with.
 # Supports Debian/Ubuntu (apt) and RHEL/Fedora (dnf).
 # Run as root.
@@ -141,7 +141,7 @@ else
 fi
 
 # === Install Ansible ===
-info "Installing Ansible 13.5.0 (community package, bundles ansible-core~=2.20.4)..."
+info "Installing Ansible (community package, bundles ansible-core)..."
 (
     source "$VENV_DIR/bin/activate"
     command -v pip &>/dev/null || error "pip not found in venv."
