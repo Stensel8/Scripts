@@ -66,6 +66,11 @@ case "$DISTRO" in
         fi
         info "Codename: ${CODENAME}"
 
+        # Verwijder eventuele kapotte/oude repo entry en GPG key van eerdere pogingen
+        info "Cleaning up stale Docker repo entries..."
+        rm -f /etc/apt/sources.list.d/docker.list
+        rm -f /etc/apt/keyrings/docker.gpg
+
         run apt-get update -y
         run apt-get install -y ca-certificates curl gnupg
 
@@ -73,6 +78,7 @@ case "$DISTRO" in
         curl -fsSL "https://download.docker.com/linux/${DISTRO}/gpg" | \
             gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>>"$LOG_FILE" || \
             error "Failed to add Docker GPG key."
+        chmod a+r /etc/apt/keyrings/docker.gpg
 
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/${DISTRO} ${CODENAME} stable" \
@@ -114,7 +120,7 @@ echo -e "\n${GREEN}=============================================================
 success "Docker installation complete!"
 echo -e "${GREEN}==============================================================${NC}\n"
 echo -e "${BLUE}Docker:${NC}       ${GREEN}${DOCKER_VER}${NC}"
-echo -e "${BLUE}Distro:${NC}       ${GREEN}${DISTRO}${NC}"
+echo -e "${BLUE}Distro:${NC}       ${GREEN}${DISTRO} (${CODENAME})${NC}"
 echo -e "${BLUE}Log:${NC}          ${GREEN}${LOG_FILE}${NC}"
 echo ""
 echo -e "${BLUE}Rootless:${NC}     dockerd-rootless-setuptool.sh install"
