@@ -50,7 +50,7 @@ ZSTD_MODULE_VERSION="0.1.1"
 ZSTD_MODULE_SHA256="707d534f8ca4263ff043066db15eac284632aea875f9fe98c96cea9529e15f41"
 
 # ACME Module
-ACME_MODULE_VERSION="0.4.0"
+ACME_MODULE_VERSION="0.4.1"
 ACME_MODULE_SHA256="5da9b5db28933ccd34a52e1069a4b920526f061ae923f80f1582cc5cad3d6bf3"
 
 # ============================================================================
