@@ -35,7 +35,7 @@ run() {
 
 # === Settings ===
 K8S_VERSION="${K8S_VERSION:-v1.36.0}"
-MINIKUBE_VERSION="${MINIKUBE_VERSION:-v1.35.0}"
+MINIKUBE_VERSION="${MINIKUBE_VERSION:-v1.38.1}"
 APT_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/deb/"
 RPM_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/rpm/"
 
