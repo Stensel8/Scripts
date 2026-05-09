@@ -35,6 +35,7 @@ run() {
 
 # === Settings ===
 K8S_VERSION="${K8S_VERSION:-v1.36.0}"
+MINIKUBE_VERSION="${MINIKUBE_VERSION:-v1.35.0}"
 APT_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/deb/"
 RPM_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/rpm/"
 
@@ -100,10 +101,12 @@ if [[ "$install_minikube" == "y" ]]; then
         *)       error "Unsupported architecture for minikube: ${ARCH}" ;;
     esac
 
-    curl -LO "https://github.com/kubernetes/minikube/releases/latest/download/${MINIKUBE_BIN}" \
-        2>>"$LOG_FILE" || error "Failed to download minikube."
+    MINIKUBE_URL="https://github.com/kubernetes/minikube/releases/download/${MINIKUBE_VERSION}/${MINIKUBE_BIN}"
+    curl -fSL "${MINIKUBE_URL}" -o "${MINIKUBE_BIN}" 2>>"$LOG_FILE" || error "Failed to download minikube."
+    curl -fSL "${MINIKUBE_URL}.sha256" -o "${MINIKUBE_BIN}.sha256" 2>>"$LOG_FILE" || error "Failed to download minikube checksum."
+    echo "$(cat "${MINIKUBE_BIN}.sha256")  ${MINIKUBE_BIN}" | sha256sum -c - >>"$LOG_FILE" 2>&1 || error "Minikube checksum verification failed."
     install "${MINIKUBE_BIN}" /usr/local/bin/minikube
-    rm -f "${MINIKUBE_BIN}"
+    rm -f "${MINIKUBE_BIN}" "${MINIKUBE_BIN}.sha256"
     success "minikube installed: $(minikube version --short 2>/dev/null)"
 fi
 

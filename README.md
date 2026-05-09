@@ -23,7 +23,7 @@ pwsh ./<tool>_installer.ps1
 
 | Directory | File(s) | Platform | Notes |
 |-----------|---------|----------|-------|
-| `ansible/` | `ansible_installer.sh` | Linux | Builds Python from source, installs Ansible in venv |
+| `ansible/` | `ansible_installer.sh` | Linux | Installs Ansible via pip in a venv |
 | `docker/` | `docker_installer.sh` | Linux | Official Docker repositories |
 | `kubernetes/` | `kubernetes_installer.sh` | Linux | kubectl + optional Minikube |
 | `nginx/` | `nginx_installer.sh`, `nginx_installer.ps1` | Linux | Custom build: OpenSSL 3.x, HTTP/2, HTTP/3, zstd, headers-more, ACME |

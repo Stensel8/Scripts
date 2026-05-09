@@ -19,18 +19,9 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # === Settings ===
-REQ_PYTHON_VERSION="${REQ_PYTHON_VERSION:-3.14}"
-BUILD_PYTHON_VERSION="${BUILD_PYTHON_VERSION:-3.14.3}"
 VENV_DIR="${VENV_DIR:-/opt/ansible-env}"
-FORCE_BUILD="${FORCE_BUILD:-false}"
-SKIP_BUILD="${SKIP_BUILD:-false}"
 
 LOG_FILE="/tmp/ansible_install_$(date +%Y%m%d_%H%M%S).log"
-
-PY_BUILD_TARBALL="Python-${BUILD_PYTHON_VERSION}.tgz"
-PY_BUILD_URL="https://www.python.org/ftp/python/${BUILD_PYTHON_VERSION}/${PY_BUILD_TARBALL}"
-PY_BUILD_SRC_DIR="/usr/src/Python-${BUILD_PYTHON_VERSION}"
-PY_CMD=""
 
 # === Logging ===
 info()    { echo -e "${BLUE}[INFO]${NC} $1"    | tee -a "$LOG_FILE"; }
@@ -59,76 +50,20 @@ info "Package manager: ${PKG_MANAGER}"
 # === Update system packages ===
 info "Updating system packages..."
 case $PKG_MANAGER in
-    apt)
-        run env DEBIAN_FRONTEND=noninteractive apt update -y
-        run env DEBIAN_FRONTEND=noninteractive apt upgrade -y
-        ;;
-    dnf)
-        run dnf upgrade -y
-        ;;
+    apt) run env DEBIAN_FRONTEND=noninteractive apt update -y ;;
+    dnf) run dnf upgrade -y ;;
 esac
 
-# === Install build dependencies ===
-info "Installing build dependencies..."
+# === Install Python and pip ===
+info "Installing Python and pip..."
 case $PKG_MANAGER in
-    apt)
-        APT_DEPS="build-essential libssl-dev zlib1g-dev libncurses5-dev libffi-dev \
-            libsqlite3-dev libbz2-dev libreadline-dev liblzma-dev make git wget curl \
-            python3-pip python3-venv software-properties-common"
-        apt-cache show libmpdec-dev &>/dev/null && APT_DEPS+=" libmpdec-dev"
-        run apt install -y $APT_DEPS
-        ;;
-    dnf)
-        run dnf install -y gcc openssl-devel bzip2-devel libffi-devel zlib-devel \
-            ncurses-devel sqlite-devel xz-devel readline-devel make git wget curl \
-            mpdecimal-devel python3-pip python3-virtualenv
-        ;;
+    apt) run env DEBIAN_FRONTEND=noninteractive apt install -y python3 python3-venv python3-pip ;;
+    dnf) run dnf install -y python3 python3-pip ;;
 esac
 
-# === Find or install Python ===
-info "Looking for Python ${REQ_PYTHON_VERSION}..."
-if command -v "python${REQ_PYTHON_VERSION}" &>/dev/null; then
-    PY_CMD="python${REQ_PYTHON_VERSION}"
-    info "Found system Python: ${PY_CMD}"
-elif [ "$PKG_MANAGER" = "apt" ] && [ "$FORCE_BUILD" = false ]; then
-    info "Trying deadsnakes PPA for Python ${REQ_PYTHON_VERSION}..."
-    if command -v add-apt-repository &>/dev/null; then
-        run add-apt-repository -y ppa:deadsnakes/ppa
-        run apt update -y
-        run apt install -y "python${REQ_PYTHON_VERSION}" "python${REQ_PYTHON_VERSION}-venv" || \
-            warn "Failed to install python${REQ_PYTHON_VERSION} from PPA."
-    else
-        warn "'add-apt-repository' not found, skipping PPA."
-    fi
-    command -v "python${REQ_PYTHON_VERSION}" &>/dev/null && PY_CMD="python${REQ_PYTHON_VERSION}"
-fi
-
-# === Build Python from source if needed ===
-if [ -z "$PY_CMD" ] && [ "$SKIP_BUILD" = false ]; then
-    info "Building Python ${BUILD_PYTHON_VERSION} from source..."
-    TARGET_PY_BIN="/usr/local/bin/python${BUILD_PYTHON_VERSION%.*}"
-    if [ -x "$TARGET_PY_BIN" ] && [ "$FORCE_BUILD" = false ]; then
-        PY_CMD="$TARGET_PY_BIN"
-    else
-        cd /usr/src
-        if [ ! -f "$PY_BUILD_TARBALL" ]; then
-            run wget -q "$PY_BUILD_URL"
-        fi
-        [ -d "$PY_BUILD_SRC_DIR" ] && rm -rf "$PY_BUILD_SRC_DIR"
-        run tar -xzf "$PY_BUILD_TARBALL"
-        cd "$PY_BUILD_SRC_DIR"
-        run ./configure --enable-optimizations --with-system-libmpdec --prefix=/usr/local
-        run make -j"$(nproc)"
-        run make altinstall
-        [ -x "$TARGET_PY_BIN" ] && PY_CMD="$TARGET_PY_BIN" || \
-            error "Python build failed."
-    fi
-elif [ -z "$PY_CMD" ]; then
-    error "No suitable Python found. Aborting."
-fi
-
-[ -z "$PY_CMD" ] || ! command -v "$PY_CMD" &>/dev/null && \
-    error "Python command not usable (PY_CMD='${PY_CMD}')."
+# === Find Python ===
+PY_CMD=$(command -v python3 || true)
+[ -z "$PY_CMD" ] && error "python3 not found after install."
 info "Using Python: ${PY_CMD} ($("$PY_CMD" --version 2>&1))"
 
 # === Create virtual environment ===

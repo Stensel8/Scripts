@@ -231,20 +231,14 @@
       "datasourceTemplate": "github-releases"
     },
     {
-      "description": "Request Python versie in ansible installer",
+      "description": "Minikube versie in bash installer",
       "customType": "regex",
-      "managerFilePatterns": ["/^ansible/ansible_installer\\.sh$/"],
-      "matchStrings": ["REQ_PYTHON_VERSION=\"(?<currentValue>[0-9.]+)\""] ,
-      "depNameTemplate": "python",
-      "datasourceTemplate": "py"
-    },
-    {
-      "description": "Build Python versie in ansible installer",
-      "customType": "regex",
-      "managerFilePatterns": ["/^ansible/ansible_installer\\.sh$/"],
-      "matchStrings": ["BUILD_PYTHON_VERSION=\"(?<currentValue>[0-9.]+)\""] ,
-      "depNameTemplate": "python",
-      "datasourceTemplate": "py"
+      "managerFilePatterns": [
+        "/^kubernetes/kubernetes_installer\\.sh$/"
+      ],
+      "matchStrings": ["MINIKUBE_VERSION:-(?<currentValue>v[0-9.]+)"],
+      "depNameTemplate": "kubernetes/minikube",
+      "datasourceTemplate": "github-releases"
     },
     {
       "description": "Vagrant versie in Windows installer",

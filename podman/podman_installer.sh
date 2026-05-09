@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # Podman Installer Script (standalone)
 # https://podman.io/docs/installation
@@ -14,12 +13,15 @@ readonly NC='\033[0m'
 readonly BOLD='\033[1m'
 
 # Logging functions
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_error() { echo -e "${RED}[✗]${NC} $1" >&2; }
-log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-log_step() { echo -e "${BOLD}$1${NC}"; }
-die() { log_error "$1"; exit 1; }
+log_error()   { echo -e "${RED}[✗]${NC} $1" >&2; }
+log_warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+log_step()    { echo -e "${BOLD}$1${NC}"; }
+die()         { log_error "$1"; exit 1; }
+
+# === Root check ===
+[ "$EUID" -ne 0 ] && die "Run as root (sudo)."
 
 usage() {
 	echo "Usage: $0 [install|remove]"
@@ -37,20 +39,20 @@ install_podman() {
 		case "$ID" in
 			ubuntu|debian)
 				log_info "Detected $ID. Installing via apt."
-				sudo apt-get update
-				sudo apt-get install -y podman
+				apt-get update
+				apt-get install -y podman
 				;;
 			fedora)
 				log_info "Detected Fedora. Installing via dnf."
-				sudo dnf -y install podman
+				dnf -y install podman
 				;;
 			centos|rhel)
-				log_info "Detected $ID. Installing via yum."
-				sudo yum -y install podman
+				log_info "Detected $ID. Installing via dnf."
+				dnf -y install podman
 				;;
 			arch)
 				log_info "Detected Arch Linux. Installing via pacman."
-				sudo pacman -Sy --noconfirm podman
+				pacman -Sy --noconfirm podman
 				;;
 			*)
 				die "Unsupported OS: $ID. Please install Podman manually."
@@ -72,16 +74,16 @@ remove_podman() {
 		. /etc/os-release
 		case "$ID" in
 			ubuntu|debian)
-				sudo apt-get remove -y podman
+				apt-get remove -y podman
 				;;
 			fedora)
-				sudo dnf -y remove podman
+				dnf -y remove podman
 				;;
 			centos|rhel)
-				sudo yum -y remove podman
+				dnf -y remove podman
 				;;
 			arch)
-				sudo pacman -Rns --noconfirm podman
+				pacman -Rns --noconfirm podman
 				;;
 			*)
 				die "Unsupported OS: $ID. Please remove Podman manually."
@@ -98,15 +100,9 @@ main() {
 		usage
 	fi
 	case "$1" in
-		install)
-			install_podman
-			;;
-		remove)
-			remove_podman
-			;;
-		*)
-			usage
-			;;
+		install) install_podman ;;
+		remove)  remove_podman ;;
+		*)       usage ;;
 	esac
 }
 
