@@ -444,6 +444,11 @@ Install-HtmlFiles() {
     Write-Log INFO "Installing HTML files"
     mkdir -p /usr/share/nginx/html
 
+    if [[ -f /usr/share/nginx/html/index.html ]]; then
+        Write-Log INFO "Existing HTML files preserved"
+        return 0
+    fi
+
     cat > /usr/share/nginx/html/index.html <<'EOF'
 <!DOCTYPE html>
 <html lang="en">
@@ -475,7 +480,12 @@ EOF
 New-SelfSignedCertificate() {
     Write-Log INFO "Generating self-signed TLS certificate"
     mkdir -p /etc/nginx/ssl
-    
+
+    if [[ -f /etc/nginx/ssl/nginx.key && -f /etc/nginx/ssl/nginx.crt ]]; then
+        Write-Log INFO "Existing SSL certificate preserved"
+        return 0
+    fi
+
     local ssl_bin
     ssl_bin=$(command -v openssl || true)
     
@@ -690,7 +700,11 @@ Install-Nginx() {
     # Install configuration files
     Install-HtmlFiles
     New-SelfSignedCertificate
-    New-NginxConfig
+    if [[ ! -f /etc/nginx/nginx.conf ]]; then
+        New-NginxConfig
+    else
+        Write-Log INFO "Existing nginx.conf preserved"
+    fi
 
     # Create nginx user
     if ! id nginx >/dev/null 2>&1; then

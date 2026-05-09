@@ -510,6 +510,11 @@ function Install-HtmlFiles {
     $htmlDir = '/usr/share/nginx/html'
     New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null
 
+    if (Test-Path (Join-Path $htmlDir 'index.html')) {
+        Write-Log 'INFO' 'Existing HTML files preserved'
+        return
+    }
+
     $indexContent = @'
 <!DOCTYPE html>
 <html lang="en">
@@ -544,6 +549,11 @@ function New-NginxSelfSignedCertificate {
     Write-Log 'INFO' 'Generating self-signed TLS certificate'
     $sslDir = '/etc/nginx/ssl'
     New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
+
+    if ((Test-Path "$sslDir/nginx.key") -and (Test-Path "$sslDir/nginx.crt")) {
+        Write-Log 'INFO' 'Existing SSL certificate preserved'
+        return
+    }
 
     # Prefer built OpenSSL binary
     $opensslBin = Join-Path $Script:BUILD_DIR 'openssl-install/bin/openssl'
@@ -759,7 +769,11 @@ function Install-Nginx {
     # Install configuration files
     Install-HtmlFiles
     New-NginxSelfSignedCertificate
-    New-NginxConfig
+    if (-not (Test-Path '/etc/nginx/nginx.conf')) {
+        New-NginxConfig
+    } else {
+        Write-Log 'INFO' 'Existing nginx.conf preserved'
+    }
 
     # Create nginx user
     bash -c 'id nginx 2>/dev/null || useradd -r -s /sbin/nologin nginx' | Out-Null
