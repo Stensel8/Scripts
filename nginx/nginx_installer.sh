@@ -26,8 +26,8 @@ fi
 # ============================================================================
 
 # NGINX
-NGINX_VERSION="1.30.0"
-NGINX_SHA256="058188c64bf22baecaa72b809a6318a4f9ba623889c554feab03f7cb853ab31b"
+NGINX_VERSION="1.31.0"
+NGINX_SHA256="6d5b00d45393af2e4e7c52a442d2a198f0ccbc7678ed062a46f403edd833ebaa"
 
 # OpenSSL
 OPENSSL_VERSION="4.0.0"
