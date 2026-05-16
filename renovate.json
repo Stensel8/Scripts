@@ -1,46 +1,70 @@
 {
-  "reviewersFromCodeOwners": true,
-  "forkProcessing": "enabled",
-  "prConcurrentLimit": 5,
-  "description": "Renovate handles all version updates for this repository",
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
   ],
   "timezone": "Europe/Amsterdam",
+  "schedule": [
+    "every day"
+  ],
+  "forkProcessing": "enabled",
   "pinDigests": true,
+  "assigneesFromCodeOwners": true,
+  "reviewersFromCodeOwners": true,
+  "enabledManagers": [
+    "github-actions",
+    "dockerfile",
+    "docker-compose",
+    "custom.regex"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommits": "enabled",
+  "rebaseWhen": "behind-base-branch",
+  "gitIgnoredAuthors": [
+    "github-actions[bot]@users.noreply.github.com",
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  ],
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "enabled": true
+  },
   "packageRules": [
     {
-      "groupName": "Docker images",
       "matchManagers": [
         "dockerfile",
         "docker-compose"
       ],
+      "groupName": "Docker images",
       "addLabels": [
         "docker"
       ]
     },
     {
-      "groupName": "GitHub Actions",
       "matchManagers": [
         "github-actions"
       ],
+      "groupName": "GitHub Actions",
       "addLabels": [
         "github-actions"
       ]
     },
     {
-      "automerge": true,
-      "automergeType": "pr",
       "matchUpdateTypes": [
         "patch",
         "digest"
-      ]
+      ],
+      "automerge": true,
+      "automergeType": "pr"
     },
     {
-      "automerge": false,
       "matchUpdateTypes": [
         "major"
-      ]
+      ],
+      "automerge": false
     },
     {
       "semanticCommitType": "deps",
@@ -74,26 +98,6 @@
       ]
     }
   ],
-  "gitIgnoredAuthors": [
-    "github-actions[bot]@users.noreply.github.com",
-    "41898282+github-actions[bot]@users.noreply.github.com"
-  ],
-  "schedule": [
-    "every day"
-  ],
-  "semanticCommits": "enabled",
-  "vulnerabilityAlerts": {
-    "labels": [
-      "security"
-    ],
-    "enabled": true
-  },
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "assigneesFromCodeOwners": true,
-  "labels": [
-    "dependencies"
-  ],
-  "rebaseWhen": "behind-base-branch",
   "customManagers": [
     {
       "datasourceTemplate": "github-releases",
@@ -324,11 +328,5 @@
         "/^windows/Install-VagrantVMware\\.ps1$/"
       ]
     }
-  ],
-  "enabledManagers": [
-    "github-actions",
-    "dockerfile",
-    "docker-compose",
-    "custom.regex"
   ]
 }
