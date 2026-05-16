@@ -17,7 +17,6 @@
   "labels": [
     "dependencies"
   ],
-  "semanticCommits": "enabled",
   "rebaseWhen": "behind-base-branch",
   "gitIgnoredAuthors": [
     "github-actions[bot]@users.noreply.github.com",
@@ -48,20 +47,6 @@
       "addLabels": [
         "github-actions"
       ]
-    },
-    {
-      "matchUpdateTypes": [
-        "patch",
-        "digest"
-      ],
-      "automerge": true,
-      "automergeType": "pr"
-    },
-    {
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "automerge": false
     },
     {
       "semanticCommitType": "deps",
@@ -325,5 +310,8 @@
         "/^windows/Install-VagrantVMware\\.ps1$/"
       ]
     }
-  ]
+  ],
+  "automerge": true,
+  "automergeType": "pr",
+  "semanticCommits": "enabled"
 }
