@@ -1,0 +1,334 @@
+{
+  "reviewersFromCodeOwners": true,
+  "forkProcessing": "enabled",
+  "prConcurrentLimit": 5,
+  "description": "Renovate handles all version updates for this repository",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Europe/Amsterdam",
+  "pinDigests": true,
+  "packageRules": [
+    {
+      "groupName": "Docker images",
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ],
+      "addLabels": [
+        "docker"
+      ]
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "addLabels": [
+        "github-actions"
+      ]
+    },
+    {
+      "automerge": true,
+      "automergeType": "pr",
+      "matchUpdateTypes": [
+        "patch",
+        "digest"
+      ]
+    },
+    {
+      "automerge": false,
+      "matchUpdateTypes": [
+        "major"
+      ]
+    },
+    {
+      "semanticCommitType": "deps",
+      "groupName": "nginx installer deps",
+      "matchFileNames": [
+        "nginx/**"
+      ],
+      "description": "Groepeer alle nginx installer-afhankelijkheden in een PR",
+      "matchManagers": [
+        "custom.regex"
+      ]
+    },
+    {
+      "semanticCommitType": "deps",
+      "groupName": "ansible installer deps",
+      "matchFileNames": [
+        "ansible/**"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ]
+    },
+    {
+      "semanticCommitType": "deps",
+      "groupName": "kubernetes installer deps",
+      "matchFileNames": [
+        "kubernetes/**"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ]
+    }
+  ],
+  "gitIgnoredAuthors": [
+    "github-actions[bot]@users.noreply.github.com",
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  ],
+  "schedule": [
+    "* 12 * * *"
+  ],
+  "semanticCommits": "enabled",
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "enabled": true
+  },
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "assigneesFromCodeOwners": true,
+  "labels": [
+    "dependencies"
+  ],
+  "rebaseWhen": "behind-base-branch",
+  "customManagers": [
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "NGINX_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "NGINX versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "nginx/nginx",
+      "extractVersionTemplate": "^release-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:NGINX_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "NGINX versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "nginx/nginx",
+      "extractVersionTemplate": "^release-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "OPENSSL_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "OpenSSL versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "openssl/openssl",
+      "extractVersionTemplate": "^openssl-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:OPENSSL_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "OpenSSL versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "openssl/openssl",
+      "extractVersionTemplate": "^openssl-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "PCRE2_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "PCRE2 versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "PCRE2Project/pcre2",
+      "extractVersionTemplate": "^pcre2-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:PCRE2_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "PCRE2 versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "PCRE2Project/pcre2",
+      "extractVersionTemplate": "^pcre2-(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "ZLIB_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "Zlib versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "madler/zlib",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:ZLIB_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "Zlib versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "madler/zlib",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "HEADERS_MORE_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "headers-more-nginx-module versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "openresty/headers-more-nginx-module",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:HEADERS_MORE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "headers-more-nginx-module versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "openresty/headers-more-nginx-module",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "ZSTD_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "zstd-nginx-module versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "tokers/zstd-nginx-module",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:ZSTD_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "zstd-nginx-module versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "tokers/zstd-nginx-module",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "ACME_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "nginx-acme versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "nginx/nginx-acme",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$Script:ACME_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
+      ],
+      "description": "nginx-acme versie in PowerShell installer",
+      "customType": "regex",
+      "depNameTemplate": "nginx/nginx-acme",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^nginx/nginx_installer\\.ps1$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "pypi",
+      "matchStrings": [
+        "pip install ansible==(?<currentValue>[0-9.]+)"
+      ],
+      "description": "Ansible versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "ansible",
+      "managerFilePatterns": [
+        "/^ansible/ansible_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "K8S_VERSION:-(?<currentValue>v[0-9.]+)"
+      ],
+      "description": "Kubernetes versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "kubernetes/kubernetes",
+      "managerFilePatterns": [
+        "/^kubernetes/kubernetes_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "MINIKUBE_VERSION:-(?<currentValue>v[0-9.]+)"
+      ],
+      "description": "Minikube versie in bash installer",
+      "customType": "regex",
+      "depNameTemplate": "kubernetes/minikube",
+      "managerFilePatterns": [
+        "/^kubernetes/kubernetes_installer\\.sh$/"
+      ]
+    },
+    {
+      "datasourceTemplate": "github-releases",
+      "matchStrings": [
+        "\\$VAGRANT_VERSION\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "description": "Vagrant versie in Windows installer",
+      "customType": "regex",
+      "depNameTemplate": "hashicorp/vagrant",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "managerFilePatterns": [
+        "/^windows/Install-VagrantVMware\\.ps1$/"
+      ]
+    }
+  ],
+  "enabledManagers": [
+    "github-actions",
+    "dockerfile",
+    "docker-compose",
+    "custom.regex"
+  ]
+}
