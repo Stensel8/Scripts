@@ -79,7 +79,7 @@
     "41898282+github-actions[bot]@users.noreply.github.com"
   ],
   "schedule": [
-    "* 12 * * *"
+    "every day at noon"
   ],
   "semanticCommits": "enabled",
   "vulnerabilityAlerts": {
