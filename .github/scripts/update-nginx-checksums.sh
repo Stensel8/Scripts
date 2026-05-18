@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# Helper script to calculate and update SHA256 checksums for NGINX dependencies
-# This script downloads the dependencies and updates the checksums in installer files
+# Recalculate and optionally apply SHA256 checksums for nginx installer dependencies.
 #
-# Usage: ./update-nginx-checksums.sh [nginx_version] [openssl_version] [pcre2_version] [zlib_version]
+# Usage:
+#   .github/scripts/update-nginx-checksums.sh
+#   .github/scripts/update-nginx-checksums.sh --apply
 #
 
 set -euo pipefail
@@ -19,121 +20,161 @@ log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1" >&2; }
 log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 
-# Get versions from arguments or read from installer files
-NGINX_VERSION="${1:-$(grep -oP 'NGINX_VERSION="\K[^"]+' nginx/nginx_installer.sh)}"
-OPENSSL_VERSION="${2:-$(grep -oP 'OPENSSL_VERSION="\K[^"]+' nginx/nginx_installer.sh)}"
-PCRE2_VERSION="${3:-$(grep -oP 'PCRE2_VERSION="\K[^"]+' nginx/nginx_installer.sh)}"
-ZLIB_VERSION="${4:-$(grep -oP 'ZLIB_VERSION="\K[^"]+' nginx/nginx_installer.sh)}"
+usage() {
+    cat <<'EOF'
+Usage: update-nginx-checksums.sh [--apply]
 
-log_info "Versions to check:"
-echo "  NGINX:   $NGINX_VERSION"
-echo "  OpenSSL: $OPENSSL_VERSION"
-echo "  PCRE2:   $PCRE2_VERSION"
-echo "  Zlib:    $ZLIB_VERSION"
+Options:
+  --apply   Apply calculated checksums to nginx/nginx_installer.sh and nginx/nginx_installer.ps1 without prompting
+  -h, --help  Show this help
+EOF
+}
+
+APPLY=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --apply)
+            APPLY=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            log_error "Unknown argument: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly REPO_ROOT
+readonly BASH_INSTALLER="$REPO_ROOT/nginx/nginx_installer.sh"
+readonly PS_INSTALLER="$REPO_ROOT/nginx/nginx_installer.ps1"
+
+cd "$REPO_ROOT"
+
+read_sh_var() {
+    local key=$1
+    sed -n "s/^${key}=\"\\([^\"]*\\)\"$/\\1/p" "$BASH_INSTALLER" | head -n1
+}
+
+update_bash_var() {
+    local key=$1
+    local value=$2
+    sed -i "s/^${key}=\"[^\"]*\"$/${key}=\"${value}\"/" "$BASH_INSTALLER"
+}
+
+update_ps_var() {
+    local key=$1
+    local value=$2
+    sed -i "s#^\\(\\\$Script:${key}[[:space:]]*=[[:space:]]*'\\)[^']*'#\\1${value}'#" "$PS_INSTALLER"
+}
+
+download_and_hash() {
+    local url=$1
+    local file=$2
+    curl -fsSL "$url" -o "$file"
+    sha256sum "$file" | awk '{print $1}'
+}
+
+NGINX_VERSION="$(read_sh_var NGINX_VERSION)"
+OPENSSL_VERSION="$(read_sh_var OPENSSL_VERSION)"
+PCRE2_VERSION="$(read_sh_var PCRE2_VERSION)"
+ZLIB_VERSION="$(read_sh_var ZLIB_VERSION)"
+HEADERS_MORE_VERSION="$(read_sh_var HEADERS_MORE_VERSION)"
+ZSTD_MODULE_VERSION="$(read_sh_var ZSTD_MODULE_VERSION)"
+ACME_MODULE_VERSION="$(read_sh_var ACME_MODULE_VERSION)"
+
+required_values=(
+    "$NGINX_VERSION"
+    "$OPENSSL_VERSION"
+    "$PCRE2_VERSION"
+    "$ZLIB_VERSION"
+    "$HEADERS_MORE_VERSION"
+    "$ZSTD_MODULE_VERSION"
+    "$ACME_MODULE_VERSION"
+)
+for value in "${required_values[@]}"; do
+    [[ -n "$value" ]] || { log_error "Failed to read one or more versions from $BASH_INSTALLER"; exit 1; }
+done
+
+log_info "Versions to recalculate:"
+echo "  NGINX:         $NGINX_VERSION"
+echo "  OpenSSL:       $OPENSSL_VERSION"
+echo "  PCRE2:         $PCRE2_VERSION"
+echo "  Zlib:          $ZLIB_VERSION"
+echo "  headers-more:  $HEADERS_MORE_VERSION"
+echo "  zstd-module:   $ZSTD_MODULE_VERSION"
+echo "  nginx-acme:    $ACME_MODULE_VERSION"
 echo
 
-# Create temp directory
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf -- "$TEMP_DIR"' EXIT
-
 cd "$TEMP_DIR"
 
-# Download and calculate checksums
-log_info "Downloading NGINX $NGINX_VERSION..."
-if wget -q "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"; then
-    NGINX_SHA256=$(sha256sum "nginx-${NGINX_VERSION}.tar.gz" | awk '{print $1}')
-    log_success "NGINX SHA256: $NGINX_SHA256"
-else
-    log_error "Failed to download NGINX $NGINX_VERSION"
-    NGINX_SHA256=""
-fi
+log_info "Downloading and hashing release tarballs..."
 
-log_info "Downloading OpenSSL $OPENSSL_VERSION..."
-if wget -q "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"; then
-    OPENSSL_SHA256=$(sha256sum "openssl-${OPENSSL_VERSION}.tar.gz" | awk '{print $1}')
-    log_success "OpenSSL SHA256: $OPENSSL_SHA256"
-else
-    log_error "Failed to download OpenSSL $OPENSSL_VERSION"
-    OPENSSL_SHA256=""
-fi
+NGINX_SHA256="$(download_and_hash "https://github.com/nginx/nginx/releases/download/release-${NGINX_VERSION}/nginx-${NGINX_VERSION}.tar.gz" "nginx.tar.gz")"
+log_success "NGINX_SHA256: $NGINX_SHA256"
 
-log_info "Downloading PCRE2 $PCRE2_VERSION..."
-if wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"; then
-    PCRE2_SHA256=$(sha256sum "pcre2-${PCRE2_VERSION}.tar.gz" | awk '{print $1}')
-    log_success "PCRE2 SHA256: $PCRE2_SHA256"
-else
-    log_error "Failed to download PCRE2 $PCRE2_VERSION"
-    PCRE2_SHA256=""
-fi
+OPENSSL_SHA256="$(download_and_hash "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" "openssl.tar.gz")"
+log_success "OPENSSL_SHA256: $OPENSSL_SHA256"
 
-log_info "Downloading Zlib $ZLIB_VERSION..."
-if wget -q "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"; then
-    ZLIB_SHA256=$(sha256sum "zlib-${ZLIB_VERSION}.tar.gz" | awk '{print $1}')
-    log_success "Zlib SHA256: $ZLIB_SHA256"
-else
-    log_error "Failed to download Zlib $ZLIB_VERSION"
-    ZLIB_SHA256=""
-fi
+PCRE2_SHA256="$(download_and_hash "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz" "pcre2.tar.gz")"
+log_success "PCRE2_SHA256: $PCRE2_SHA256"
+
+ZLIB_SHA256="$(download_and_hash "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz" "zlib.tar.gz")"
+log_success "ZLIB_SHA256: $ZLIB_SHA256"
+
+HEADERS_MORE_SHA256="$(download_and_hash "https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v${HEADERS_MORE_VERSION}.tar.gz" "headers-more.tar.gz")"
+log_success "HEADERS_MORE_SHA256: $HEADERS_MORE_SHA256"
+
+ZSTD_MODULE_SHA256="$(download_and_hash "https://github.com/tokers/zstd-nginx-module/archive/refs/tags/${ZSTD_MODULE_VERSION}.tar.gz" "zstd-module.tar.gz")"
+log_success "ZSTD_MODULE_SHA256: $ZSTD_MODULE_SHA256"
+
+ACME_MODULE_SHA256="$(download_and_hash "https://github.com/nginx/nginx-acme/releases/download/v${ACME_MODULE_VERSION}/nginx-acme-${ACME_MODULE_VERSION}.tar.gz" "nginx-acme.tar.gz")"
+log_success "ACME_MODULE_SHA256: $ACME_MODULE_SHA256"
 
 echo
-log_info "SHA256 Checksums:"
-echo "===================="
-[ -n "$NGINX_SHA256" ] && echo "NGINX:   $NGINX_SHA256"
-[ -n "$OPENSSL_SHA256" ] && echo "OpenSSL: $OPENSSL_SHA256"
-[ -n "$PCRE2_SHA256" ] && echo "PCRE2:   $PCRE2_SHA256"
-[ -n "$ZLIB_SHA256" ] && echo "Zlib:    $ZLIB_SHA256"
+log_info "Calculated checksums:"
+echo "  NGINX_SHA256:         $NGINX_SHA256"
+echo "  OPENSSL_SHA256:       $OPENSSL_SHA256"
+echo "  PCRE2_SHA256:         $PCRE2_SHA256"
+echo "  ZLIB_SHA256:          $ZLIB_SHA256"
+echo "  HEADERS_MORE_SHA256:  $HEADERS_MORE_SHA256"
+echo "  ZSTD_MODULE_SHA256:   $ZSTD_MODULE_SHA256"
+echo "  ACME_MODULE_SHA256:   $ACME_MODULE_SHA256"
 echo
 
-# Ask if user wants to update the files
-read -rp "Update installer files with these checksums? [y/N] " response
-if [[ "$response" =~ ^[Yy]$ ]]; then
-    cd "$OLDPWD"
-
-    # Update Bash installer
-    if [ -n "$NGINX_SHA256" ]; then
-        sed -i "s/NGINX_SHA256=\"[^\"]*\"/NGINX_SHA256=\"$NGINX_SHA256\"/" nginx/nginx_installer.sh
-        log_success "Updated NGINX SHA256 in nginx_installer.sh"
+if [[ "$APPLY" != true ]]; then
+    read -rp "Apply these checksums to installer files? [y/N] " response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        log_info "No changes made"
+        exit 0
     fi
-
-    if [ -n "$OPENSSL_SHA256" ]; then
-        sed -i "s/OPENSSL_SHA256=\"[^\"]*\"/OPENSSL_SHA256=\"$OPENSSL_SHA256\"/" nginx/nginx_installer.sh
-        log_success "Updated OpenSSL SHA256 in nginx_installer.sh"
-    fi
-
-    if [ -n "$PCRE2_SHA256" ]; then
-        sed -i "s/PCRE2_SHA256=\"[^\"]*\"/PCRE2_SHA256=\"$PCRE2_SHA256\"/" nginx/nginx_installer.sh
-        log_success "Updated PCRE2 SHA256 in nginx_installer.sh"
-    fi
-
-    if [ -n "$ZLIB_SHA256" ]; then
-        sed -i "s/ZLIB_SHA256=\"[^\"]*\"/ZLIB_SHA256=\"$ZLIB_SHA256\"/" nginx/nginx_installer.sh
-        log_success "Updated Zlib SHA256 in nginx_installer.sh"
-    fi
-
-    # Update PowerShell installer ($Script:VAR = '...' met single quotes)
-    if [ -n "$NGINX_SHA256" ]; then
-        sed -i "s/\(\\\$Script:NGINX_SHA256\s*=\s*'\)[^']*'/\1$NGINX_SHA256'/" nginx/nginx_installer.ps1
-        log_success "Updated NGINX SHA256 in nginx_installer.ps1"
-    fi
-
-    if [ -n "$OPENSSL_SHA256" ]; then
-        sed -i "s/\(\\\$Script:OPENSSL_SHA256\s*=\s*'\)[^']*'/\1$OPENSSL_SHA256'/" nginx/nginx_installer.ps1
-        log_success "Updated OpenSSL SHA256 in nginx_installer.ps1"
-    fi
-
-    if [ -n "$PCRE2_SHA256" ]; then
-        sed -i "s/\(\\\$Script:PCRE2_SHA256\s*=\s*'\)[^']*'/\1$PCRE2_SHA256'/" nginx/nginx_installer.ps1
-        log_success "Updated PCRE2 SHA256 in nginx_installer.ps1"
-    fi
-
-    if [ -n "$ZLIB_SHA256" ]; then
-        sed -i "s/\(\\\$Script:ZLIB_SHA256\s*=\s*'\)[^']*'/\1$ZLIB_SHA256'/" nginx/nginx_installer.ps1
-        log_success "Updated Zlib SHA256 in nginx_installer.ps1"
-    fi
-
-    echo
-    log_success "All checksums updated in installer files!"
-    log_info "Review the changes with: git diff nginx/"
-else
-    log_info "No changes made to installer files"
 fi
+
+cd "$REPO_ROOT"
+
+update_bash_var NGINX_SHA256 "$NGINX_SHA256"
+update_bash_var OPENSSL_SHA256 "$OPENSSL_SHA256"
+update_bash_var PCRE2_SHA256 "$PCRE2_SHA256"
+update_bash_var ZLIB_SHA256 "$ZLIB_SHA256"
+update_bash_var HEADERS_MORE_SHA256 "$HEADERS_MORE_SHA256"
+update_bash_var ZSTD_MODULE_SHA256 "$ZSTD_MODULE_SHA256"
+update_bash_var ACME_MODULE_SHA256 "$ACME_MODULE_SHA256"
+
+update_ps_var NGINX_SHA256 "$NGINX_SHA256"
+update_ps_var OPENSSL_SHA256 "$OPENSSL_SHA256"
+update_ps_var PCRE2_SHA256 "$PCRE2_SHA256"
+update_ps_var ZLIB_SHA256 "$ZLIB_SHA256"
+update_ps_var HEADERS_MORE_SHA256 "$HEADERS_MORE_SHA256"
+update_ps_var ZSTD_MODULE_SHA256 "$ZSTD_MODULE_SHA256"
+update_ps_var ACME_MODULE_SHA256 "$ACME_MODULE_SHA256"
+
+log_success "Updated checksums in:"
+echo "  - nginx/nginx_installer.sh"
+echo "  - nginx/nginx_installer.ps1"
