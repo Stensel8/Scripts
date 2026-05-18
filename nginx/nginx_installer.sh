@@ -694,8 +694,10 @@ Install-Nginx() {
     fi
 
     # Install dynamic modules
+    shopt -s nullglob
     local nginx_module_files=(objs/*.so)
-    if [[ ! -e "${nginx_module_files[0]}" ]]; then
+    shopt -u nullglob
+    if [[ ${#nginx_module_files[@]} -eq 0 ]]; then
         Stop-Script "No NGINX dynamic modules found in $BUILD_DIR/nginx/objs"
     fi
     cp "${nginx_module_files[@]}" "${NGINX_MODULES_PATH}/" || Stop-Script "Failed to copy NGINX modules"
