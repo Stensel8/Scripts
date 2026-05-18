@@ -54,14 +54,14 @@ ACME_MODULE_VERSION="0.4.1"
 ACME_MODULE_SHA256="b4f99f971bd0bebc89b2037f3afeaa3281004fe434de558df87d69cab2be1f22"
 
 # ============================================================================
-# Static Configuration
+# Configuration
 # ============================================================================
 
 BUILD_DIR="/tmp/nginx-build-$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="/var/lib/nginx-backup-$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/var/log/nginx-installer-$(date +%Y%m%d-%H%M%S).log"
 
-# FHS-compliant install paths (matching what dnf/rpm would use)
+# install paths (matching what dnf/rpm would use)
 NGINX_PREFIX="/usr/share/nginx"
 case "$(uname -m)" in
     x86_64|aarch64) NGINX_LIBDIR="/usr/lib64" ;;
