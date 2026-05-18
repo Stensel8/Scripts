@@ -694,8 +694,31 @@ Install-Nginx() {
     fi
 
     # Install dynamic modules
-    cp objs/*.so "${NGINX_MODULES_PATH}/" 2>/dev/null || true
-    cp "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" "${NGINX_MODULES_PATH}/" 2>/dev/null || true
+    local nginx_module_files=()
+    local module_file
+    while IFS= read -r module_file; do
+        nginx_module_files+=("$module_file")
+    done < <(compgen -G 'objs/*.so' || true)
+
+    if [[ ${#nginx_module_files[@]} -eq 0 ]]; then
+        Stop-Script "No NGINX dynamic modules found in $BUILD_DIR/nginx/objs"
+    fi
+    cp "${nginx_module_files[@]}" "${NGINX_MODULES_PATH}/" || Stop-Script "Failed to copy NGINX modules"
+
+    local acme_module="$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so"
+    [[ -f "$acme_module" ]] || Stop-Script "ACME module not found: $acme_module"
+    cp "$acme_module" "${NGINX_MODULES_PATH}/" || Stop-Script "Failed to copy ACME module"
+
+    local required_modules=(
+        ngx_http_zstd_filter_module.so
+        ngx_http_zstd_static_module.so
+        ngx_http_headers_more_filter_module.so
+        ngx_http_acme_module.so
+    )
+    local module
+    for module in "${required_modules[@]}"; do
+        [[ -f "${NGINX_MODULES_PATH}/${module}" ]] || Stop-Script "Required module missing after install: ${module}"
+    done
 
     # Install configuration files
     Install-HtmlFiles

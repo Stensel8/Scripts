@@ -192,7 +192,9 @@ function Install-Dependencies {
             & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
         'pacman' {
-            if (-not (& pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf 2>&1 | Out-Null)) {
+            $null = & pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf 2>&1
+            $pacmanExit = $LASTEXITCODE
+            if ($pacmanExit -ne 0) {
                 Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
             }
         }
@@ -761,10 +763,37 @@ function Install-Nginx {
     }
 
     # Install dynamic modules
-    Copy-Item "$Script:BUILD_DIR/nginx/objs/*.so" -Destination $Script:NGINX_MODULES_PATH -Force
-    if ($LASTEXITCODE -ne 0) { Stop-Script "Failed to copy NGINX modules" }
-    Copy-Item "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Destination $Script:NGINX_MODULES_PATH -Force
-    if ($LASTEXITCODE -ne 0) { Stop-Script "Failed to copy ACME module" }
+    $nginxModules = Get-ChildItem -Path "$Script:BUILD_DIR/nginx/objs" -Filter '*.so' -File -ErrorAction SilentlyContinue
+    if (-not $nginxModules) {
+        Stop-Script "No NGINX dynamic modules found in $Script:BUILD_DIR/nginx/objs"
+    }
+    try {
+        Copy-Item -Path $nginxModules.FullName -Destination $Script:NGINX_MODULES_PATH -Force -ErrorAction Stop
+    } catch {
+        Stop-Script "Failed to copy NGINX modules: $($_.Exception.Message)"
+    }
+
+    $acmeModule = "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so"
+    if (-not (Test-Path $acmeModule)) {
+        Stop-Script "ACME module not found: $acmeModule"
+    }
+    try {
+        Copy-Item -Path $acmeModule -Destination $Script:NGINX_MODULES_PATH -Force -ErrorAction Stop
+    } catch {
+        Stop-Script "Failed to copy ACME module: $($_.Exception.Message)"
+    }
+
+    $requiredModules = @(
+        'ngx_http_zstd_filter_module.so',
+        'ngx_http_zstd_static_module.so',
+        'ngx_http_headers_more_filter_module.so',
+        'ngx_http_acme_module.so'
+    )
+    foreach ($module in $requiredModules) {
+        if (-not (Test-Path (Join-Path $Script:NGINX_MODULES_PATH $module))) {
+            Stop-Script "Required module missing after install: $module"
+        }
+    }
 
     # Install configuration files
     Install-HtmlFiles
