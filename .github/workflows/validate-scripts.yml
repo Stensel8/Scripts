@@ -37,7 +37,8 @@ jobs:
         run: |
           # Find all .sh files, excluding third-party directories
           find . -type f -name "*.sh" \
-            ! -path "./TLS-tools/testssl.sh*" \
+            ! -path "./TLS-tools/testssl.sh/*" \
+            ! -path "./TLS-tools/testssl.sh" \
             > bash_scripts.txt
           cat bash_scripts.txt
 

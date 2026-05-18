@@ -192,8 +192,9 @@ function Install-Dependencies {
             & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
         'pacman' {
-            & pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf *> $null
-            if ($LASTEXITCODE -ne 0) {
+            $null = & pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf 2>&1
+            $pacmanExit = $LASTEXITCODE
+            if ($pacmanExit -ne 0) {
                 Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
             }
         }

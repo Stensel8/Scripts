@@ -694,9 +694,12 @@ Install-Nginx() {
     fi
 
     # Install dynamic modules
-    shopt -s nullglob
-    local nginx_module_files=(objs/*.so)
-    shopt -u nullglob
+    local nginx_module_files=()
+    local module_file
+    while IFS= read -r module_file; do
+        nginx_module_files+=("$module_file")
+    done < <(compgen -G 'objs/*.so' || true)
+
     if [[ ${#nginx_module_files[@]} -eq 0 ]]; then
         Stop-Script "No NGINX dynamic modules found in $BUILD_DIR/nginx/objs"
     fi
