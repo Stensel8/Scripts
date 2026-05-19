@@ -81,7 +81,7 @@ info "Installing Ansible (community package, bundles ansible-core)..."
     source "$VENV_DIR/bin/activate"
     command -v pip &>/dev/null || error "pip not found in venv."
     run pip install --upgrade pip setuptools wheel
-    run pip install ansible==13.6.0
+    run pip install ansible==13.7.0
 ) || error "Failed during venv operations."
 
 # === Global symlinks ===
