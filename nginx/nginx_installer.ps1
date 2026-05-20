@@ -491,7 +491,7 @@ export LDFLAGS='-lzstd'
         $lib64  = Join-Path $opensslInstall 'lib64'
         $libDir = if (Test-Path $lib64) { $lib64 } else { Join-Path $opensslInstall 'lib' }
         Write-Log 'INFO' "Using custom OpenSSL for ACME (Static Link): $opensslInstall"
-        $acmeEnv = "export OPENSSL_DIR='$opensslInstall' && export OPENSSL_LIB_DIR='$libDir' && export OPENSSL_INCLUDE_DIR='$opensslInstall/include' && export OPENSSL_STATIC=1"
+        $acmeEnv = "export OPENSSL_DIR='$opensslInstall' && export OPENSSL_LIB_DIR='$libDir' && export OPENSSL_INCLUDE_DIR='$opensslInstall/include' && export OPENSSL_STATIC=0"
     }
 
     $cargoEnvPart = if ($acmeEnv) { " && $acmeEnv" } else { '' }

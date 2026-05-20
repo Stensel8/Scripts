@@ -423,7 +423,7 @@ Build-Nginx() {
             export OPENSSL_LIB_DIR="$BUILD_DIR/openssl-install/lib"
         fi
         export OPENSSL_INCLUDE_DIR="$BUILD_DIR/openssl-install/include"
-        export OPENSSL_STATIC=1
+        export OPENSSL_STATIC=0
         Write-Log INFO "Using custom OpenSSL for ACME (Static Link): $OPENSSL_DIR"
     fi
     
