@@ -67,7 +67,7 @@ $Script:ACME_MODULE_SHA256  = 'b4f99f971bd0bebc89b2037f3afeaa3281004fe434de558df
 # Static Configuration
 # ============================================================================
 
-$Script:BUILD_DIR  = "/tmp/nginx-build-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+$Script:BUILD_DIR  = "/var/tmp/nginx-build-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:BACKUP_DIR = "/var/lib/nginx-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $Script:LOG_FILE   = "/var/log/nginx-installer-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
@@ -315,12 +315,12 @@ function Build-Nginx {
     Get-ChildItem /tmp -Filter 'cc*'   -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem /tmp -Filter 'tmp.*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Check disk space in /tmp
-    $tmpSpace = (& df /tmp | Select-Object -Skip 1 | ForEach-Object {
+    # Check disk space in /var/tmp
+    $tmpSpace = (& df /var/tmp | Select-Object -Skip 1 | ForEach-Object {
         $_.Split([char[]]@(' ', "`t"), [System.StringSplitOptions]::RemoveEmptyEntries)[3]
     })
     if ($tmpSpace -and [int]$tmpSpace -lt 1048576) {
-        Write-Log 'WARN' 'Low disk space in /tmp, using build directory'
+        Write-Log 'WARN' 'Low disk space in /var/tmp, using build directory'
         $env:TMPDIR = $Script:BUILD_DIR
     }
 

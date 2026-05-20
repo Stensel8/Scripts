@@ -57,7 +57,7 @@ ACME_MODULE_SHA256="b4f99f971bd0bebc89b2037f3afeaa3281004fe434de558df87d69cab2be
 # Configuration
 # ============================================================================
 
-BUILD_DIR="/tmp/nginx-build-$(date +%Y%m%d-%H%M%S)"
+BUILD_DIR="/var/tmp/nginx-build-$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="/var/lib/nginx-backup-$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/var/log/nginx-installer-$(date +%Y%m%d-%H%M%S).log"
 
@@ -255,11 +255,11 @@ Build-Nginx() {
     # Clean compiler temp files (not the build dir itself — managed by EXIT trap)
     rm -rf /tmp/cc* /tmp/tmp.* 2>/dev/null || true
     
-    # Check disk space in /tmp
+    # Check disk space in /var/tmp
     local tmp_space
-    tmp_space=$(df /tmp | tail -1 | awk '{print $4}')
+    tmp_space=$(df /var/tmp | tail -1 | awk '{print $4}')
     if [[ $tmp_space -lt 1048576 ]]; then
-        Write-Log WARN "Low disk space in /tmp, using build directory"
+        Write-Log WARN "Low disk space in /var/tmp, using build directory"
         export TMPDIR="$BUILD_DIR"
     fi
     
