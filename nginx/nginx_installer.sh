@@ -190,8 +190,7 @@ Update-SystemPackages() {
             apt-get upgrade -y -q || Stop-Script "apt-get upgrade failed"
             ;;
         dnf)
-            dnf upgrade -y -q 2>&1 | grep -E '(Complete|Error|Failed)' || true
-            if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            if ! dnf upgrade -y -q >/dev/null 2>&1; then
                 Stop-Script "dnf upgrade failed"
             fi
             ;;
@@ -333,8 +332,13 @@ Build-Nginx() {
     export CC=gcc
     
     # Verify libzstd availability
-    if [[ ! -f /usr/lib/libzstd.so && ! -f /usr/lib/libzstd.so.1 && 
-          ! -f /usr/lib64/libzstd.so && ! -f /usr/lib64/libzstd.so.1 ]]; then
+    if command -v ldconfig >/dev/null 2>&1; then
+        if ! ldconfig -p 2>/dev/null | grep -q "libzstd.so"; then
+            Stop-Script "Shared libzstd not found. Install libzstd-dev/devel"
+        fi
+    elif [[ ! -f /usr/lib/libzstd.so && ! -f /usr/lib/libzstd.so.1 &&
+            ! -f /usr/lib64/libzstd.so && ! -f /usr/lib64/libzstd.so.1 &&
+            ! -f /usr/local/lib/libzstd.so ]]; then
         Stop-Script "Shared libzstd not found. Install libzstd-dev/devel"
     fi
     
@@ -443,11 +447,6 @@ Build-Nginx() {
 Install-HtmlFiles() {
     Write-Log INFO "Installing HTML files"
     mkdir -p /usr/share/nginx/html
-
-    if [[ -f /usr/share/nginx/html/index.html ]]; then
-        Write-Log INFO "Existing HTML files preserved"
-        return 0
-    fi
 
     cat > /usr/share/nginx/html/index.html <<'EOF'
 <!DOCTYPE html>
@@ -664,7 +663,12 @@ EOF
 
 Install-Nginx() {
     Write-Log INFO "Installing Nginx"
-    
+
+    local had_existing_nginx=false
+    [[ -d /etc/nginx ]] && had_existing_nginx=true
+    local had_existing_html=false
+    [[ -f /usr/share/nginx/html/index.html ]] && had_existing_html=true
+
     # Backup existing configuration
     if [[ -d /etc/nginx ]]; then
         mkdir -p "$BACKUP_DIR"
@@ -721,9 +725,13 @@ Install-Nginx() {
     done
 
     # Install configuration files
-    Install-HtmlFiles
+    if [[ $had_existing_html == false ]]; then
+        Install-HtmlFiles
+    else
+        Write-Log INFO "Existing HTML files preserved"
+    fi
     New-SelfSignedCertificate
-    if [[ ! -f /etc/nginx/nginx.conf ]]; then
+    if [[ $had_existing_nginx == false ]]; then
         New-NginxConfig
     else
         Write-Log INFO "Existing nginx.conf preserved"
@@ -735,8 +743,8 @@ Install-Nginx() {
     fi
 
     chown -R nginx:nginx /var/log/nginx /var/cache/nginx /var/lib/nginx
-    chown root:nginx /etc/nginx/ssl
-    chmod 640 /etc/nginx/ssl/nginx.key
+    chown root:root /etc/nginx/ssl
+    chmod 600 /etc/nginx/ssl/nginx.key
     chmod 644 /etc/nginx/ssl/nginx.crt
     chmod 755 /etc/nginx/conf.d "${NGINX_MODULES_PATH}"
     

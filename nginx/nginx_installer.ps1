@@ -385,10 +385,18 @@ function Build-Nginx {
     Push-Location $nginxSrc
 
     # Verify libzstd availability
-    $zstdPaths = @('/usr/lib/libzstd.so', '/usr/lib/libzstd.so.1', '/usr/lib64/libzstd.so', '/usr/lib64/libzstd.so.1', '/usr/local/lib/libzstd.so')
-    $found = $zstdPaths | Where-Object { Test-Path $_ }
-    if (-not $found) {
-        Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
+    $ldconfigAvail = bash -c 'command -v ldconfig >/dev/null 2>&1 && echo yes || echo no'
+    if ($ldconfigAvail.Trim() -eq 'yes') {
+        $ldconfigResult = bash -c 'ldconfig -p 2>/dev/null | grep -q "libzstd.so" && echo found || echo missing'
+        if ($ldconfigResult.Trim() -eq 'missing') {
+            Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
+        }
+    } else {
+        $zstdPaths = @('/usr/lib/libzstd.so', '/usr/lib/libzstd.so.1', '/usr/lib64/libzstd.so', '/usr/lib64/libzstd.so.1', '/usr/local/lib/libzstd.so')
+        $found = $zstdPaths | Where-Object { Test-Path $_ }
+        if (-not $found) {
+            Stop-Script 'Shared libzstd not found. Install libzstd-dev/devel'
+        }
     }
 
     $pcre2Path   = Join-Path $Script:BUILD_DIR 'pcre2'
@@ -511,11 +519,6 @@ function Install-HtmlFiles {
     Write-Log 'INFO' 'Installing HTML files'
     $htmlDir = '/usr/share/nginx/html'
     New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null
-
-    if (Test-Path (Join-Path $htmlDir 'index.html')) {
-        Write-Log 'INFO' 'Existing HTML files preserved'
-        return
-    }
 
     $indexContent = @'
 <!DOCTYPE html>
@@ -719,6 +722,9 @@ http {
 function Install-Nginx {
     Write-Log 'INFO' 'Installing Nginx'
 
+    $hadExistingNginx = Test-Path '/etc/nginx'
+    $hadExistingHtml  = Test-Path '/usr/share/nginx/html/index.html'
+
     # Backup existing configuration
     if (Test-Path '/etc/nginx') {
         New-Item -ItemType Directory -Path $Script:BACKUP_DIR -Force | Out-Null
@@ -796,9 +802,13 @@ function Install-Nginx {
     }
 
     # Install configuration files
-    Install-HtmlFiles
+    if (-not $hadExistingHtml) {
+        Install-HtmlFiles
+    } else {
+        Write-Log 'INFO' 'Existing HTML files preserved'
+    }
     New-NginxSelfSignedCertificate
-    if (-not (Test-Path '/etc/nginx/nginx.conf')) {
+    if (-not $hadExistingNginx) {
         New-NginxConfig
     } else {
         Write-Log 'INFO' 'Existing nginx.conf preserved'
@@ -808,8 +818,8 @@ function Install-Nginx {
     bash -c 'id nginx 2>/dev/null || useradd -r -s /sbin/nologin nginx' | Out-Null
 
     bash -c "chown -R nginx:nginx /var/log/nginx /var/cache/nginx /var/lib/nginx" | Out-Null
-    bash -c "chown root:nginx /etc/nginx/ssl" | Out-Null
-    bash -c "chmod 640 /etc/nginx/ssl/nginx.key" | Out-Null
+    bash -c "chown root:root /etc/nginx/ssl" | Out-Null
+    bash -c "chmod 600 /etc/nginx/ssl/nginx.key" | Out-Null
     bash -c "chmod 644 /etc/nginx/ssl/nginx.crt" | Out-Null
     bash -c "chmod 755 /etc/nginx/conf.d '$Script:NGINX_MODULES_PATH'" | Out-Null
 
