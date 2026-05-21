@@ -81,7 +81,6 @@ download_and_hash() {
 }
 
 NGINX_VERSION="$(read_sh_var NGINX_VERSION)"
-OPENSSL_VERSION="$(read_sh_var OPENSSL_VERSION)"
 PCRE2_VERSION="$(read_sh_var PCRE2_VERSION)"
 ZLIB_VERSION="$(read_sh_var ZLIB_VERSION)"
 HEADERS_MORE_VERSION="$(read_sh_var HEADERS_MORE_VERSION)"
@@ -90,7 +89,6 @@ ACME_MODULE_VERSION="$(read_sh_var ACME_MODULE_VERSION)"
 
 required_values=(
     "$NGINX_VERSION"
-    "$OPENSSL_VERSION"
     "$PCRE2_VERSION"
     "$ZLIB_VERSION"
     "$HEADERS_MORE_VERSION"
@@ -103,7 +101,6 @@ done
 
 log_info "Versions to recalculate:"
 echo "  NGINX:         $NGINX_VERSION"
-echo "  OpenSSL:       $OPENSSL_VERSION"
 echo "  PCRE2:         $PCRE2_VERSION"
 echo "  Zlib:          $ZLIB_VERSION"
 echo "  headers-more:  $HEADERS_MORE_VERSION"
@@ -119,9 +116,6 @@ log_info "Downloading and hashing release tarballs..."
 
 NGINX_SHA256="$(download_and_hash "https://github.com/nginx/nginx/releases/download/release-${NGINX_VERSION}/nginx-${NGINX_VERSION}.tar.gz" "nginx.tar.gz")"
 log_success "NGINX_SHA256: $NGINX_SHA256"
-
-OPENSSL_SHA256="$(download_and_hash "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" "openssl.tar.gz")"
-log_success "OPENSSL_SHA256: $OPENSSL_SHA256"
 
 PCRE2_SHA256="$(download_and_hash "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz" "pcre2.tar.gz")"
 log_success "PCRE2_SHA256: $PCRE2_SHA256"
@@ -141,7 +135,6 @@ log_success "ACME_MODULE_SHA256: $ACME_MODULE_SHA256"
 echo
 log_info "Calculated checksums:"
 echo "  NGINX_SHA256:         $NGINX_SHA256"
-echo "  OPENSSL_SHA256:       $OPENSSL_SHA256"
 echo "  PCRE2_SHA256:         $PCRE2_SHA256"
 echo "  ZLIB_SHA256:          $ZLIB_SHA256"
 echo "  HEADERS_MORE_SHA256:  $HEADERS_MORE_SHA256"
@@ -160,7 +153,6 @@ fi
 cd "$REPO_ROOT"
 
 update_bash_var NGINX_SHA256 "$NGINX_SHA256"
-update_bash_var OPENSSL_SHA256 "$OPENSSL_SHA256"
 update_bash_var PCRE2_SHA256 "$PCRE2_SHA256"
 update_bash_var ZLIB_SHA256 "$ZLIB_SHA256"
 update_bash_var HEADERS_MORE_SHA256 "$HEADERS_MORE_SHA256"
@@ -168,7 +160,6 @@ update_bash_var ZSTD_MODULE_SHA256 "$ZSTD_MODULE_SHA256"
 update_bash_var ACME_MODULE_SHA256 "$ACME_MODULE_SHA256"
 
 update_ps_var NGINX_SHA256 "$NGINX_SHA256"
-update_ps_var OPENSSL_SHA256 "$OPENSSL_SHA256"
 update_ps_var PCRE2_SHA256 "$PCRE2_SHA256"
 update_ps_var ZLIB_SHA256 "$ZLIB_SHA256"
 update_ps_var HEADERS_MORE_SHA256 "$HEADERS_MORE_SHA256"
