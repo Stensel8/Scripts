@@ -110,32 +110,6 @@
     {
       "datasourceTemplate": "github-releases",
       "matchStrings": [
-        "OPENSSL_VERSION=\"(?<currentValue>[^\"]+)\""
-      ],
-      "description": "OpenSSL versie in bash installer",
-      "customType": "regex",
-      "depNameTemplate": "openssl/openssl",
-      "extractVersionTemplate": "^openssl-(?<version>.+)$",
-      "managerFilePatterns": [
-        "/^nginx/nginx_installer\\.sh$/"
-      ]
-    },
-    {
-      "datasourceTemplate": "github-releases",
-      "matchStrings": [
-        "\\$Script:OPENSSL_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
-      ],
-      "description": "OpenSSL versie in PowerShell installer",
-      "customType": "regex",
-      "depNameTemplate": "openssl/openssl",
-      "extractVersionTemplate": "^openssl-(?<version>.+)$",
-      "managerFilePatterns": [
-        "/^nginx/nginx_installer\\.ps1$/"
-      ]
-    },
-    {
-      "datasourceTemplate": "github-releases",
-      "matchStrings": [
         "PCRE2_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
       "description": "PCRE2 versie in bash installer",
