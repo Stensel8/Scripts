@@ -29,10 +29,6 @@ fi
 NGINX_VERSION="1.31.0"
 NGINX_SHA256="6d5b00d45393af2e4e7c52a442d2a198f0ccbc7678ed062a46f403edd833ebaa"
 
-# OpenSSL
-OPENSSL_VERSION="4.0.0"
-OPENSSL_SHA256="c32cf49a959c4f345f9606982dd36e7d28f7c58b19c2e25d75624d2b3d2f79ac"
-
 # PCRE2
 PCRE2_VERSION="10.47"
 PCRE2_SHA256="c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16"
@@ -71,7 +67,6 @@ NGINX_MODULES_PATH="${NGINX_LIBDIR}/nginx/modules"
 
 # Download URLs
 NGINX_URL="https://github.com/nginx/nginx/releases/download/release-${NGINX_VERSION}/nginx-${NGINX_VERSION}.tar.gz"
-OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 PCRE2_URL="https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
 ZLIB_URL="https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
 HEADERS_MORE_URL="https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v${HEADERS_MORE_VERSION}.tar.gz"
@@ -150,13 +145,13 @@ Install-Dependencies() {
         apt)
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq >/dev/null 2>&1
-            apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev curl gcc make cargo pkg-config clang gawk cmake >/dev/null 2>&1
+            apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev libssl-dev curl gcc make cargo pkg-config clang gawk cmake >/dev/null 2>&1
             ;;
         dnf)
-            dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake >/dev/null 2>&1
+            dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel openssl-devel curl perl cargo pkgconf-pkg-config clang gawk cmake >/dev/null 2>&1
             ;;
         pacman)
-            if ! pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf >/dev/null 2>&1; then
+            if ! pacman -Sy --noconfirm --needed base-devel pcre2 zstd openssl curl clang gawk cmake pkgconf >/dev/null 2>&1; then
                 Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
             fi
             ;;
@@ -215,7 +210,6 @@ Get-Sources() {
     Write-Log INFO "Downloading sources"
     
     Get-File "$NGINX_URL" "nginx.tgz" "$NGINX_SHA256"
-    Get-File "$OPENSSL_URL" "openssl.tgz" "$OPENSSL_SHA256"
     Get-File "$PCRE2_URL" "pcre2.tgz" "$PCRE2_SHA256"
     Get-File "$ZLIB_URL" "zlib.tgz" "$ZLIB_SHA256"
     Get-File "$HEADERS_MORE_URL" "headers.tgz" "$HEADERS_MORE_SHA256"
@@ -228,7 +222,6 @@ Get-Sources() {
     rm -rf nginx openssl pcre2 zlib headers-more zstd-module nginx-acme 2>/dev/null || true
     
     tar xzf nginx.tgz && mv "nginx-${NGINX_VERSION}" nginx
-    tar xzf openssl.tgz && mv "openssl-${OPENSSL_VERSION}" openssl
     tar xzf pcre2.tgz && mv "pcre2-${PCRE2_VERSION}" pcre2
     tar xzf zlib.tgz && mv "zlib-${ZLIB_VERSION}" zlib
     tar xzf headers.tgz && mv "headers-more-nginx-module-${HEADERS_MORE_VERSION}" headers-more
@@ -243,18 +236,9 @@ Get-Sources() {
 # ============================================================================
 
 Build-Nginx() {
-    local use_system_ssl=false
-    local ssl_opt=""
-    
-    # Detect WSL ARM64 and fall back to system OpenSSL
-    if [[ $(uname -r) =~ microsoft ]] && [[ $(uname -m) == aarch64 ]]; then
-        Write-Log WARN "WSL ARM64 detected - using system OpenSSL"
-        use_system_ssl=true
-    fi
-    
     # Clean compiler temp files (not the build dir itself — managed by EXIT trap)
     rm -rf /tmp/cc* /tmp/tmp.* 2>/dev/null || true
-    
+
     # Check disk space in /var/tmp
     local tmp_space
     tmp_space=$(df /var/tmp | tail -1 | awk '{print $4}')
@@ -262,68 +246,13 @@ Build-Nginx() {
         Write-Log WARN "Low disk space in /var/tmp, using build directory"
         export TMPDIR="$BUILD_DIR"
     fi
-    
+
     # Ensure cc symlink exists
     if ! command -v cc >/dev/null 2>&1; then
         ln -sf /usr/bin/gcc /usr/local/bin/cc 2>/dev/null || true
         export PATH="/usr/local/bin:$PATH"
     fi
-    
-    # Build OpenSSL standalone for ACME module
-    if [[ $use_system_ssl == false ]]; then
-        Write-Log INFO "Building OpenSSL ${OPENSSL_VERSION} (Standalone)"
-        cd "$BUILD_DIR/openssl" || Stop-Script "OpenSSL source missing"
-        
-        local arch
-        arch=$(uname -m)
-        case $arch in
-            x86_64)  arch="linux-x86_64" ;;
-            aarch64) arch="linux-aarch64" ;;
-            armv7l)  arch="linux-armv4" ;;
-            *)       arch="linux-generic64" ;;
-        esac
-        
-        export TMPDIR="$BUILD_DIR"
-        export CC=gcc
-        
-        local output configure_exit
-        output=$(./Configure "$arch" \
-            --prefix="$(pwd)/../openssl-install" \
-            --openssldir="$(pwd)/../openssl-install/ssl" \
-            enable-tls1_3 shared -fPIC 2>&1) && configure_exit=0 || configure_exit=$?
-        output=$(printf '%s\n' "$output" | grep -v '^DEBUG:' | grep -v '^No value given' || true)
-        if [[ $configure_exit -ne 0 ]]; then
-            use_system_ssl=true
-            Write-Log WARN "OpenSSL configure failed"
-        else
-            local make_exit
-            output=$(make -j"$(nproc)" 2>&1) && make_exit=0 || make_exit=$?
-            output=$(printf '%s\n' "$output" | grep -v '^DEBUG:' || true)
-            if [[ $make_exit -ne 0 ]]; then
-                use_system_ssl=true
-                Write-Log WARN "OpenSSL build failed"
-            else
-                if ! make install_sw >/dev/null 2>&1; then
-                    Stop-Script "OpenSSL make install_sw failed"
-                fi
-                ssl_opt="--with-openssl=$BUILD_DIR/openssl"
-                Write-Log INFO "OpenSSL built successfully"
-            fi
-        fi
-    fi
-    
-    # Fallback to system OpenSSL
-    if [[ $use_system_ssl == true ]]; then
-        local mgr
-        mgr=$(Detect-PkgMgr)
-        case $mgr in
-            apt) apt-get install -y libssl-dev >/dev/null 2>&1 ;;
-            dnf) dnf install -y openssl-devel >/dev/null 2>&1 ;;
-            pacman) pacman -Sy --noconfirm openssl >/dev/null 2>&1 ;;
-        esac
-        Write-Log INFO "Using system OpenSSL"
-    fi
-    
+
     # Build NGINX
     Write-Log INFO "Building Nginx ${NGINX_VERSION}"
     cd "$BUILD_DIR/nginx" || Stop-Script "Nginx source missing"
@@ -359,7 +288,6 @@ Build-Nginx() {
         --http-fastcgi-temp-path=/var/lib/nginx/tmp/fastcgi \
         --http-uwsgi-temp-path=/var/lib/nginx/tmp/uwsgi \
         --http-scgi-temp-path=/var/lib/nginx/tmp/scgi \
-        $ssl_opt \
         --with-pcre="$BUILD_DIR/pcre2" \
         --with-zlib="$BUILD_DIR/zlib" \
         --with-pcre-jit \
@@ -412,19 +340,6 @@ Build-Nginx() {
         Write-Log WARN "rustc not found, installing rustup"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         source "$HOME/.cargo/env"
-    fi
-    
-    # Setup OpenSSL for Rust
-    if [[ -d "$BUILD_DIR/openssl-install" ]]; then
-        export OPENSSL_DIR="$BUILD_DIR/openssl-install"
-        if [[ -d "$BUILD_DIR/openssl-install/lib64" ]]; then
-            export OPENSSL_LIB_DIR="$BUILD_DIR/openssl-install/lib64"
-        else
-            export OPENSSL_LIB_DIR="$BUILD_DIR/openssl-install/lib"
-        fi
-        export OPENSSL_INCLUDE_DIR="$BUILD_DIR/openssl-install/include"
-        export OPENSSL_STATIC=0
-        Write-Log INFO "Using custom OpenSSL for ACME (Static Link): $OPENSSL_DIR"
     fi
     
     local cargo_output
@@ -487,56 +402,18 @@ New-SelfSignedCertificate() {
 
     local ssl_bin
     ssl_bin=$(command -v openssl || true)
-    
-    # Prefer built OpenSSL binary
-    if [[ -x "${BUILD_DIR}/openssl-install/bin/openssl" ]]; then
-        ssl_bin="${BUILD_DIR}/openssl-install/bin/openssl"
-    fi
-    
-    # Fallback: install openssl
-    if [[ -z "$ssl_bin" ]]; then
-        local mgr
-        mgr=$(Detect-PkgMgr)
-        case $mgr in
-            apt) apt-get install -y openssl >/dev/null 2>&1 ;;
-            dnf) dnf install -y openssl >/dev/null 2>&1 ;;
-            pacman) pacman -Sy --noconfirm openssl >/dev/null 2>&1 ;;
-        esac
-        ssl_bin=$(command -v openssl || true)
-    fi
-    
     [[ -n "$ssl_bin" ]] || Stop-Script "openssl not found"
-    
+
     local output
-    
-    # Setup library path for custom OpenSSL
-    if [[ "$ssl_bin" == *"/openssl-install/bin/openssl" ]]; then
-        local openssl_libdir="${BUILD_DIR}/openssl-install/lib"
-        if [[ -d "${BUILD_DIR}/openssl-install/lib64" ]]; then
-            openssl_libdir="${BUILD_DIR}/openssl-install/lib64"
-        fi
-        
-        if ! output=$(LD_LIBRARY_PATH="$openssl_libdir:${LD_LIBRARY_PATH:-}" OPENSSL_CONF=/dev/null "$ssl_bin" req -x509 -newkey ec \
-            -pkeyopt ec_paramgen_curve:secp384r1 \
-            -days 365 -nodes \
-            -keyout /etc/nginx/ssl/nginx.key \
-            -out /etc/nginx/ssl/nginx.crt \
-            -subj '/CN=localhost' \
-            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1); then
-            Write-Log ERROR "OpenSSL output: $output"
-            Stop-Script "Certificate generation failed"
-        fi
-    else
-        if ! output=$(OPENSSL_CONF=/dev/null "$ssl_bin" req -x509 -newkey ec \
-            -pkeyopt ec_paramgen_curve:secp384r1 \
-            -days 365 -nodes \
-            -keyout /etc/nginx/ssl/nginx.key \
-            -out /etc/nginx/ssl/nginx.crt \
-            -subj '/CN=localhost' \
-            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1); then
-            Write-Log ERROR "OpenSSL output: $output"
-            Stop-Script "Certificate generation failed"
-        fi
+    if ! output=$(OPENSSL_CONF=/dev/null "$ssl_bin" req -x509 -newkey ec \
+        -pkeyopt ec_paramgen_curve:secp384r1 \
+        -days 365 -nodes \
+        -keyout /etc/nginx/ssl/nginx.key \
+        -out /etc/nginx/ssl/nginx.crt \
+        -subj '/CN=localhost' \
+        -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1); then
+        Write-Log ERROR "OpenSSL output: $output"
+        Stop-Script "Certificate generation failed"
     fi
     
     chmod 600 /etc/nginx/ssl/nginx.key
@@ -771,7 +648,9 @@ EOF
     systemctl enable nginx >/dev/null 2>&1
     nginx -t && systemctl start nginx
     
-    Write-Log INFO "Nginx ${NGINX_VERSION} with OpenSSL ${OPENSSL_VERSION} installed"
+    local openssl_ver
+    openssl_ver=$(openssl version 2>/dev/null | awk '{print $1" "$2}' || echo "OpenSSL unknown")
+    Write-Log INFO "Nginx ${NGINX_VERSION} with ${openssl_ver} (system) installed"
     Write-Log INFO "Access: https://localhost"
     Write-Log INFO "Manage nginx with: systemctl {start|stop|reload|restart|status} nginx"
     nginx -V 2>&1 | head -n1 || true

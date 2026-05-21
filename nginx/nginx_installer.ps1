@@ -39,10 +39,6 @@ if (-not $IsLinux) {
 $Script:NGINX_VERSION = '1.31.0'
 $Script:NGINX_SHA256  = '6d5b00d45393af2e4e7c52a442d2a198f0ccbc7678ed062a46f403edd833ebaa'
 
-# OpenSSL
-$Script:OPENSSL_VERSION = '4.0.0'
-$Script:OPENSSL_SHA256  = 'c32cf49a959c4f345f9606982dd36e7d28f7c58b19c2e25d75624d2b3d2f79ac'
-
 # PCRE2
 $Script:PCRE2_VERSION = '10.47'
 $Script:PCRE2_SHA256  = 'c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16'
@@ -78,7 +74,6 @@ $Script:NGINX_MODULES_PATH = "$Script:NGINX_LIBDIR/nginx/modules"
 
 # Download URLs
 $Script:NGINX_URL        = "https://github.com/nginx/nginx/releases/download/release-$($Script:NGINX_VERSION)/nginx-$($Script:NGINX_VERSION).tar.gz"
-$Script:OPENSSL_URL      = "https://github.com/openssl/openssl/releases/download/openssl-$($Script:OPENSSL_VERSION)/openssl-$($Script:OPENSSL_VERSION).tar.gz"
 $Script:PCRE2_URL        = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$($Script:PCRE2_VERSION)/pcre2-$($Script:PCRE2_VERSION).tar.gz"
 $Script:ZLIB_URL         = "https://github.com/madler/zlib/releases/download/v$($Script:ZLIB_VERSION)/zlib-$($Script:ZLIB_VERSION).tar.gz"
 $Script:HEADERS_MORE_URL = "https://github.com/openresty/headers-more-nginx-module/archive/refs/tags/v$($Script:HEADERS_MORE_VERSION).tar.gz"
@@ -186,13 +181,13 @@ function Install-Dependencies {
         'apt' {
             $env:DEBIAN_FRONTEND = 'noninteractive'
             & apt-get update -qq 2>&1 | Out-Null
-            & apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev curl gcc make cargo pkg-config clang gawk cmake 2>&1 | Out-Null
+            & apt-get install -y build-essential libpcre2-dev zlib1g-dev libzstd-dev libssl-dev curl gcc make cargo pkg-config clang gawk cmake 2>&1 | Out-Null
         }
         'dnf' {
-            & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
+            & dnf install -y -q gcc gcc-c++ make pcre2-devel zlib-devel libzstd-devel openssl-devel curl perl cargo pkgconf-pkg-config clang gawk cmake 2>&1 | Out-Null
         }
         'pacman' {
-            $null = & pacman -Sy --noconfirm --needed base-devel pcre2 zstd curl clang gawk cmake pkgconf 2>&1
+            $null = & pacman -Sy --noconfirm --needed base-devel pcre2 zstd openssl curl clang gawk cmake pkgconf 2>&1
             $pacmanExit = $LASTEXITCODE
             if ($pacmanExit -ne 0) {
                 Write-Log WARN "pacman install failed, will try rustup for cargo. Note: zlib is not required (zlib-ng-compat provides it)."
@@ -257,7 +252,6 @@ function Get-Sources {
     Write-Log 'INFO' 'Downloading sources'
 
     Get-File $Script:NGINX_URL        'nginx.tgz'   $Script:NGINX_SHA256
-    Get-File $Script:OPENSSL_URL      'openssl.tgz' $Script:OPENSSL_SHA256
     Get-File $Script:PCRE2_URL        'pcre2.tgz'   $Script:PCRE2_SHA256
     Get-File $Script:ZLIB_URL         'zlib.tgz'    $Script:ZLIB_SHA256
     Get-File $Script:HEADERS_MORE_URL 'headers.tgz' $Script:HEADERS_MORE_SHA256
@@ -271,9 +265,6 @@ function Get-Sources {
 
     & tar xzf nginx.tgz
     Move-Item "nginx-$Script:NGINX_VERSION" nginx -Force
-
-    & tar xzf openssl.tgz
-    Move-Item "openssl-$Script:OPENSSL_VERSION" openssl -Force
 
     & tar xzf pcre2.tgz
     Move-Item "pcre2-$Script:PCRE2_VERSION" pcre2 -Force
@@ -299,18 +290,6 @@ function Get-Sources {
 # ============================================================================
 
 function Build-Nginx {
-    $useSystemSsl = $false
-    $sslOpt       = ''
-
-    $kernelInfo = & uname -r
-    $arch       = & uname -m
-
-    # Detect WSL ARM64 and fall back to system OpenSSL
-    if ($kernelInfo -match 'microsoft' -and $arch -eq 'aarch64') {
-        Write-Log 'WARN' 'WSL ARM64 detected - using system OpenSSL'
-        $useSystemSsl = $true
-    }
-
     # Clean compiler temp files (not the build dir itself — managed by finally block)
     Get-ChildItem /tmp -Filter 'cc*'   -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     Get-ChildItem /tmp -Filter 'tmp.*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -331,51 +310,6 @@ function Build-Nginx {
             New-Item -ItemType SymbolicLink -Path '/usr/local/bin/cc' -Target $gccPath.Source -Force -ErrorAction SilentlyContinue | Out-Null
             $env:PATH = "/usr/local/bin:$($env:PATH)"
         }
-    }
-
-    # Build OpenSSL standalone for ACME module
-    if (-not $useSystemSsl) {
-        Write-Log 'INFO' "Building OpenSSL $Script:OPENSSL_VERSION (Standalone)"
-        $opensslSrc = Join-Path $Script:BUILD_DIR 'openssl'
-        if (-not (Test-Path $opensslSrc)) { Stop-Script 'OpenSSL source missing' }
-        Push-Location $opensslSrc
-
-        $archConfig = switch ($arch) {
-            'x86_64'  { 'linux-x86_64' }
-            'aarch64' { 'linux-aarch64' }
-            'armv7l'  { 'linux-armv4' }
-            default   { 'linux-generic64' }
-        }
-
-        $opensslInstallDir = Join-Path $Script:BUILD_DIR 'openssl-install'
-        bash -c "export TMPDIR='$Script:BUILD_DIR' && export CC=gcc && ./Configure '$archConfig' --prefix='$opensslInstallDir' --openssldir='$opensslInstallDir/ssl' enable-tls1_3 shared -fPIC 2>&1 | grep -v '^DEBUG:' | grep -v '^No value given'" | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log 'WARN' 'OpenSSL configure failed'
-            $useSystemSsl = $true
-        } else {
-            $nproc = (bash -c 'nproc').Trim()
-            bash -c "export TMPDIR='$Script:BUILD_DIR' && make -j$nproc 2>&1 | grep -v '^DEBUG:'" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Log 'WARN' 'OpenSSL build failed'
-                $useSystemSsl = $true
-            } else {
-                bash -c "make install_sw 2>&1 | grep -v '^DEBUG:'" | Out-Host
-                $sslOpt = "--with-openssl=$(Join-Path $Script:BUILD_DIR 'openssl')"
-                Write-Log 'INFO' 'OpenSSL built successfully'
-            }
-        }
-        Pop-Location
-    }
-
-    # Fallback to system OpenSSL
-    if ($useSystemSsl) {
-        $mgr = Get-PkgMgr
-        switch ($mgr) {
-            'apt' { & apt-get install -y libssl-dev 2>&1 | Out-Null }
-            'dnf' { & dnf install -y openssl-devel 2>&1 | Out-Null }
-            'pacman' { & pacman -Sy --noconfirm openssl 2>&1 | Out-Null }
-        }
-        Write-Log 'INFO' 'Using system OpenSSL'
     }
 
     # Build NGINX
@@ -422,7 +356,6 @@ export LDFLAGS='-lzstd'
   --http-fastcgi-temp-path=/var/lib/nginx/tmp/fastcgi \
   --http-uwsgi-temp-path=/var/lib/nginx/tmp/uwsgi \
   --http-scgi-temp-path=/var/lib/nginx/tmp/scgi \
-  $sslOpt \
   --with-pcre=$pcre2Path \
   --with-zlib=$zlibPath \
   --with-pcre-jit \
@@ -484,18 +417,7 @@ export LDFLAGS='-lzstd'
         bash -lc "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" | Out-Null
     }
 
-    # Setup OpenSSL for Rust
-    $opensslInstall = Join-Path $Script:BUILD_DIR 'openssl-install'
-    $acmeEnv = ''
-    if (Test-Path $opensslInstall) {
-        $lib64  = Join-Path $opensslInstall 'lib64'
-        $libDir = if (Test-Path $lib64) { $lib64 } else { Join-Path $opensslInstall 'lib' }
-        Write-Log 'INFO' "Using custom OpenSSL for ACME (Static Link): $opensslInstall"
-        $acmeEnv = "export OPENSSL_DIR='$opensslInstall' && export OPENSSL_LIB_DIR='$libDir' && export OPENSSL_INCLUDE_DIR='$opensslInstall/include' && export OPENSSL_STATIC=0"
-    }
-
-    $cargoEnvPart = if ($acmeEnv) { " && $acmeEnv" } else { '' }
-    $acmeOutput = bash -lc "$sourceCargo$cargoEnvPart && cargo build --release 2>&1"
+    $acmeOutput = bash -lc "$sourceCargo && cargo build --release 2>&1"
     if ($LASTEXITCODE -ne 0) {
         $lastLines = ($acmeOutput -split "`n" | Select-Object -Last 20) -join "`n"
         Write-Log 'ERROR' "ACME build failed: $lastLines"
@@ -560,38 +482,13 @@ function New-NginxSelfSignedCertificate {
         return
     }
 
-    # Prefer built OpenSSL binary
-    $opensslBin = Join-Path $Script:BUILD_DIR 'openssl-install/bin/openssl'
-    if (-not (Test-Path $opensslBin)) {
-        $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
-    }
-
-    # Fallback: install openssl
-    if (-not $opensslBin) {
-        $mgr = Get-PkgMgr
-        switch ($mgr) {
-            'apt' { & apt-get install -y openssl 2>&1 | Out-Null }
-            'dnf' { & dnf install -y openssl 2>&1 | Out-Null }
-            'pacman' { & pacman -Sy --noconfirm openssl 2>&1 | Out-Null }
-        }
-        $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
-    }
-
+    $opensslBin = (Get-Command openssl -ErrorAction SilentlyContinue)?.Source
     if (-not $opensslBin) { Stop-Script 'openssl not found' }
 
     $keyPath = "$sslDir/nginx.key"
     $crtPath = "$sslDir/nginx.crt"
 
-    # Setup library path for custom OpenSSL
-    $envPrefix = ''
-    if ($opensslBin -match 'openssl-install') {
-        $libDir = Join-Path $Script:BUILD_DIR 'openssl-install/lib64'
-        if (-not (Test-Path $libDir)) { $libDir = Join-Path $Script:BUILD_DIR 'openssl-install/lib' }
-        $envPrefix = "LD_LIBRARY_PATH='$libDir':`$LD_LIBRARY_PATH "
-        Write-Log 'INFO' "Using built openssl: $opensslBin"
-    }
-
-    $cmd = "${envPrefix}OPENSSL_CONF=/dev/null '$opensslBin' req -x509 -newkey ec -pkeyopt ec_paramgen_curve:secp384r1 -days 365 -nodes -keyout '$keyPath' -out '$crtPath' -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1"
+    $cmd = "OPENSSL_CONF=/dev/null '$opensslBin' req -x509 -newkey ec -pkeyopt ec_paramgen_curve:secp384r1 -days 365 -nodes -keyout '$keyPath' -out '$crtPath' -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2>&1"
     $output = bash -c $cmd
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "OpenSSL output: $output"
@@ -848,7 +745,9 @@ WantedBy=multi-user.target
     bash -c 'nginx -t && systemctl start nginx' | Out-Null
     if ($LASTEXITCODE -ne 0) { Stop-Script 'Failed to start nginx' }
 
-    Write-Log 'INFO' "Nginx $Script:NGINX_VERSION with OpenSSL $Script:OPENSSL_VERSION installed"
+    $opensslVer = (bash -c 'openssl version 2>/dev/null').Trim()
+    if (-not $opensslVer) { $opensslVer = 'OpenSSL unknown' }
+    Write-Log 'INFO' "Nginx $Script:NGINX_VERSION with $opensslVer (system) installed"
     Write-Log 'INFO' 'Access: https://localhost'
     Write-Log 'INFO' 'Manage nginx with: systemctl {start|stop|reload|restart|status} nginx'
     bash -c 'nginx -V 2>&1 | head -n1'
