@@ -36,7 +36,7 @@ if (-not $IsLinux) {
 # ============================================================================
 
 # NGINX
-$Script:NGINX_VERSION = '1.31.0'
+$Script:NGINX_VERSION = '1.31.1'
 $Script:NGINX_SHA256  = '6d5b00d45393af2e4e7c52a442d2a198f0ccbc7678ed062a46f403edd833ebaa'
 
 # PCRE2
