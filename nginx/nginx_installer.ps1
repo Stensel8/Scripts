@@ -233,7 +233,7 @@ function Update-SystemPackages {
         }
         'pacman' {
             & pacman -Syu --noconfirm 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Stop-Script 'pacman upgrade failed' }
+            if ($LASTEXITCODE -ne 0) { Write-Log 'WARN' 'pacman upgrade failed' }
         }
         default {
             Write-Log 'WARN' 'Unable to detect package manager'
@@ -425,7 +425,15 @@ export LDFLAGS='-lzstd'
     }
 
     New-Item -ItemType Directory -Path "$Script:BUILD_DIR/nginx-acme/objs" -Force | Out-Null
-    Copy-Item 'target/release/libnginx_acme.so' -Destination "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Force -ErrorAction SilentlyContinue
+    $acmeSo = 'target/release/libnginx_acme.so'
+    if (-not (Test-Path $acmeSo)) {
+        Stop-Script "ACME module not built: $acmeSo missing (cargo build may have failed)"
+    }
+    try {
+        Copy-Item $acmeSo -Destination "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Force -ErrorAction Stop
+    } catch {
+        Stop-Script "Failed to stage ACME module: $($_.Exception.Message)"
+    }
 
     Pop-Location # nginx-acme
     Pop-Location # nginx
@@ -742,7 +750,7 @@ WantedBy=multi-user.target
 
     bash -c 'systemctl daemon-reload' | Out-Null
     bash -c 'systemctl enable nginx' 2>&1 | Out-Null
-    bash -c 'nginx -t && systemctl start nginx' | Out-Null
+    bash -c '/usr/sbin/nginx -t && systemctl start nginx' | Out-Null
     if ($LASTEXITCODE -ne 0) { Stop-Script 'Failed to start nginx' }
 
     $opensslVer = (bash -c 'openssl version 2>/dev/null').Trim()
@@ -750,7 +758,7 @@ WantedBy=multi-user.target
     Write-Log 'INFO' "Nginx $Script:NGINX_VERSION with $opensslVer (system) installed"
     Write-Log 'INFO' 'Access: https://localhost'
     Write-Log 'INFO' 'Manage nginx with: systemctl {start|stop|reload|restart|status} nginx'
-    bash -c 'nginx -V 2>&1 | head -n1'
+    bash -c '/usr/sbin/nginx -V 2>&1 | head -n1'
 
     $testResult = Test-NginxInstallation
     if (-not $testResult) {
@@ -773,7 +781,7 @@ function Test-NginxInstallation {
         Write-Log 'INFO' 'ACME module present'
     }
 
-    $nginxTest = bash -c 'nginx -t 2>&1'
+    $nginxTest = bash -c '/usr/sbin/nginx -t 2>&1'
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "nginx -t failed: $nginxTest"
         $ok = $false
@@ -819,8 +827,25 @@ function Remove-Nginx {
 function Test-RunningWebServers {
     $portsInUse = [System.Collections.Generic.List[string]]::new()
 
+    $portTool = (bash -c '(command -v lsof >/dev/null 2>&1 && echo lsof) || (command -v ss >/dev/null 2>&1 && echo ss) || echo none').Trim()
+    if ($portTool -eq 'none') {
+        Write-Log 'WARN' 'Neither lsof nor ss available; skipping port conflict check'
+        return
+    }
+
     foreach ($port in @(80, 443)) {
-        $procId = (bash -c "lsof -ti :$port 2>/dev/null | head -n1" 2>$null)?.Trim()
+        $detectPid = @'
+tool=$1; port=$2
+if [ "$tool" = "lsof" ]; then
+    lsof -ti ":$port" 2>/dev/null | head -n1
+else
+    ss -tlnp 2>/dev/null | awk -v p="$port" '
+        $0 ~ ":"p"[[:space:]]" {
+            if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART+4, RLENGTH-4); exit }
+        }'
+fi
+'@
+        $procId = (bash -c $detectPid 'detect-port' $portTool $port 2>$null)?.Trim()
         if ($procId) {
             $proc = (bash -c "ps -p $procId -o comm= 2>/dev/null || echo unknown").Trim()
             $portsInUse.Add("$port ($proc)")
@@ -862,5 +887,6 @@ try {
         }
     }
 } finally {
+    Stop-Transcript -ErrorAction SilentlyContinue
     Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
 }
