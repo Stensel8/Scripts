@@ -349,8 +349,10 @@ Build-Nginx() {
     fi
     
     mkdir -p "$BUILD_DIR/nginx-acme/objs"
-    cp target/release/libnginx_acme.so "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" \
-        || Stop-Script "Failed to stage ACME module: target/release/libnginx_acme.so not found"
+    local acme_so="target/release/libnginx_acme.so"
+    [[ -f "$acme_so" ]] || Stop-Script "ACME module not built: $acme_so missing (cargo build may have failed)"
+    cp "$acme_so" "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" \
+        || Stop-Script "Failed to stage ACME module: cp failed (check disk space or permissions)"
     
     Write-Log INFO "ACME module built successfully"
     Write-Log INFO "Build complete"
@@ -647,7 +649,7 @@ EOF
     
     systemctl daemon-reload
     systemctl enable nginx >/dev/null 2>&1
-    if ! nginx -t; then
+    if ! /usr/sbin/nginx -t; then
         Stop-Script "nginx configuration test failed — check the error above"
     fi
     systemctl start nginx || Stop-Script "Failed to start nginx service"
@@ -657,7 +659,7 @@ EOF
     Write-Log INFO "Nginx ${NGINX_VERSION} with ${openssl_ver} (system) installed"
     Write-Log INFO "Access: https://localhost"
     Write-Log INFO "Manage nginx with: systemctl {start|stop|reload|restart|status} nginx"
-    nginx -V 2>&1 | head -n1 || true
+    /usr/sbin/nginx -V 2>&1 | head -n1 || true
     
     Test-NginxInstallation || Write-Log WARN "Post-install checks detected issues"
 }
@@ -676,7 +678,7 @@ Test-NginxInstallation() {
         Write-Log INFO "ACME module present"
     fi
     
-    if ! nginx -t >/dev/null 2>&1; then
+    if ! /usr/sbin/nginx -t >/dev/null 2>&1; then
         Write-Log ERROR "nginx -t failed"
         return 1
     fi
@@ -717,14 +719,25 @@ Remove-Nginx() {
 
 Test-RunningWebServers() {
     local ports_in_use=()
+    local has_lsof=0 has_ss=0
+    command -v lsof >/dev/null 2>&1 && has_lsof=1
+    command -v ss   >/dev/null 2>&1 && has_ss=1
+
+    if [[ $has_lsof -eq 0 && $has_ss -eq 0 ]]; then
+        Write-Log WARN "Neither lsof nor ss available; skipping port conflict check"
+        return 0
+    fi
 
     for port in 80 443; do
         local pid
-        if command -v lsof >/dev/null 2>&1; then
+        if [[ $has_lsof -eq 1 ]]; then
             pid=$(lsof -ti :"$port" 2>/dev/null | head -n1 || true)
         else
             pid=$(ss -tlnp 2>/dev/null \
-                | awk -v p="${port}" '$0 ~ ":"p"[[:space:]]" {match($0,/pid=([0-9]+)/,a); if(a[1]) {print a[1]; exit}}' \
+                | awk -v p="${port}" '
+                    $0 ~ ":"p"[[:space:]]" {
+                        if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART+4, RLENGTH-4); exit }
+                    }' \
                 || true)
         fi
         if [[ -n "$pid" ]]; then
