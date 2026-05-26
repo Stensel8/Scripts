@@ -233,7 +233,7 @@ function Update-SystemPackages {
         }
         'pacman' {
             & pacman -Syu --noconfirm 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Stop-Script 'pacman upgrade failed' }
+            if ($LASTEXITCODE -ne 0) { Write-Log 'WARN' 'pacman upgrade failed' }
         }
         default {
             Write-Log 'WARN' 'Unable to detect package manager'
@@ -425,7 +425,11 @@ export LDFLAGS='-lzstd'
     }
 
     New-Item -ItemType Directory -Path "$Script:BUILD_DIR/nginx-acme/objs" -Force | Out-Null
-    Copy-Item 'target/release/libnginx_acme.so' -Destination "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Force -ErrorAction SilentlyContinue
+    try {
+        Copy-Item 'target/release/libnginx_acme.so' -Destination "$Script:BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" -Force -ErrorAction Stop
+    } catch {
+        Stop-Script 'Failed to stage ACME module: target/release/libnginx_acme.so not found'
+    }
 
     Pop-Location # nginx-acme
     Pop-Location # nginx
@@ -820,7 +824,15 @@ function Test-RunningWebServers {
     $portsInUse = [System.Collections.Generic.List[string]]::new()
 
     foreach ($port in @(80, 443)) {
-        $procId = (bash -c "lsof -ti :$port 2>/dev/null | head -n1" 2>$null)?.Trim()
+        $detectPid = @'
+port=$1
+if command -v lsof >/dev/null 2>&1; then
+    lsof -ti ":$port" 2>/dev/null | head -n1
+else
+    ss -tlnp 2>/dev/null | awk -v p="$port" '$0 ~ ":"p"[[:space:]]" {match($0,/pid=([0-9]+)/,a); if(a[1]) {print a[1]; exit}}'
+fi
+'@
+        $procId = (bash -c $detectPid 'detect-port' $port 2>$null)?.Trim()
         if ($procId) {
             $proc = (bash -c "ps -p $procId -o comm= 2>/dev/null || echo unknown").Trim()
             $portsInUse.Add("$port ($proc)")
@@ -862,5 +874,6 @@ try {
         }
     }
 } finally {
+    Stop-Transcript -ErrorAction SilentlyContinue
     Remove-Item $Script:BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
 }

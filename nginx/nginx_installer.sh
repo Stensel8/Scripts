@@ -349,7 +349,8 @@ Build-Nginx() {
     fi
     
     mkdir -p "$BUILD_DIR/nginx-acme/objs"
-    cp target/release/libnginx_acme.so "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" || true
+    cp target/release/libnginx_acme.so "$BUILD_DIR/nginx-acme/objs/ngx_http_acme_module.so" \
+        || Stop-Script "Failed to stage ACME module: target/release/libnginx_acme.so not found"
     
     Write-Log INFO "ACME module built successfully"
     Write-Log INFO "Build complete"
@@ -553,7 +554,7 @@ Install-Nginx() {
     fi
     
     # Install binaries
-    cd "$BUILD_DIR/nginx"
+    cd "$BUILD_DIR/nginx" || Stop-Script "Cannot cd to $BUILD_DIR/nginx"
     local output
     if ! output=$(make install 2>&1); then
         Write-Log ERROR "Install output: $(echo "$output" | tail -10)"
@@ -646,7 +647,10 @@ EOF
     
     systemctl daemon-reload
     systemctl enable nginx >/dev/null 2>&1
-    nginx -t && systemctl start nginx
+    if ! nginx -t; then
+        Stop-Script "nginx configuration test failed — check the error above"
+    fi
+    systemctl start nginx || Stop-Script "Failed to start nginx service"
     
     local openssl_ver
     openssl_ver=$(openssl version 2>/dev/null | awk '{print $1" "$2}' || echo "OpenSSL unknown")
@@ -716,7 +720,13 @@ Test-RunningWebServers() {
 
     for port in 80 443; do
         local pid
-        pid=$(lsof -ti :"$port" 2>/dev/null | head -n1 || true)
+        if command -v lsof >/dev/null 2>&1; then
+            pid=$(lsof -ti :"$port" 2>/dev/null | head -n1 || true)
+        else
+            pid=$(ss -tlnp 2>/dev/null \
+                | awk -v p="${port}" '$0 ~ ":"p"[[:space:]]" {match($0,/pid=([0-9]+)/,a); if(a[1]) {print a[1]; exit}}' \
+                || true)
+        fi
         if [[ -n "$pid" ]]; then
             local proc
             proc=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
