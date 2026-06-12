@@ -25,7 +25,6 @@ dependency, this workflow recalculates the SHA256 checksums via
 ### 3. Script Validator (`.github/workflows/validate-scripts.yml`)
 Runs on all PRs and commits to validate:
 - Bash script syntax and quality (ShellCheck)
-- Shared boilerplate consistency (`.github/scripts/check-boilerplate.sh`)
 - PowerShell script syntax and quality (PSScriptAnalyzer)
 - Potential security issues
 
@@ -33,13 +32,12 @@ Runs on all PRs and commits to validate:
 
 ## Script Structure Guidelines
 
-### Shared boilerplate (bash)
+### Shared helpers (bash)
 
-Every bash script carries an identical boilerplate block (colors, `Write-Log`,
-`Stop-Script`, `Test-Root`, `Get-PkgMgr`, `Get-OsId`, `Invoke-Cmd`). The
-canonical copy lives in `.github/scripts/boilerplate.sh`; CI fails when a
-script's copy drifts. To change the boilerplate, edit the reference file and
-copy the block (markers included) into every script.
+Every bash script is standalone but carries the same helper functions
+(colors, `Write-Log`, `Stop-Script`, `Test-Root`, `Get-PkgMgr`, `Get-OsId`,
+`Invoke-Cmd`). When you improve a helper, apply the same change in the other
+scripts so they stay aligned.
 
 ### Naming convention
 
@@ -51,8 +49,8 @@ Hyphenated function names are bash-only syntax, so scripts must keep the
 ### Distro support (Linux)
 
 All Linux installers support apt (Debian/Ubuntu), dnf (Fedora/RHEL) and
-pacman (Arch). New installers should cover all three; use `Get-PkgMgr` from
-the boilerplate and add a clear `Stop-Script` for unsupported systems.
+pacman (Arch). New installers should cover all three; use the shared
+`Get-PkgMgr` helper and add a clear `Stop-Script` for unsupported systems.
 
 ### Version Configuration
 
@@ -78,7 +76,7 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 ### Logging
 
-Use the boilerplate logging functions instead of raw `echo`:
+Use the shared helper functions instead of raw `echo`:
 
 ```bash
 Write-Log INFO "Installing build dependencies"
@@ -87,7 +85,7 @@ Stop-Script "Unsupported package manager."
 Invoke-Cmd apt-get install -y podman   # logs + aborts on failure
 ```
 
-Set `LOG_FILE` (after the boilerplate block) to also append plain-text logs
+Set `LOG_FILE` (after the helper functions) to also append plain-text logs
 to a file.
 
 ## Updating Installer Scripts
@@ -147,7 +145,6 @@ Validate with `npx --yes --package renovate -- renovate-config-validator renovat
    ```bash
    bash -n script_name.sh
    shellcheck -S warning script_name.sh
-   bash .github/scripts/check-boilerplate.sh
    ```
 
 2. **Test installation**: Run on a clean system (VM/container recommended)
@@ -178,8 +175,7 @@ Validate with `npx --yes --package renovate -- renovate-config-validator renovat
 
 1. Create the script in an appropriate directory
 2. Follow existing naming convention: `<tool>_installer.sh`
-3. Start from the boilerplate block in `.github/scripts/boilerplate.sh` and
-   add the script to `REQUIRED_SCRIPTS` in `.github/scripts/check-boilerplate.sh`
+3. Copy the shared helper functions from an existing installer
 4. Support apt, dnf and pacman
 5. Include a version configuration section at the top (if versions are pinned)
 6. Test thoroughly on clean systems

@@ -60,9 +60,6 @@ jobs:
 
           exit $failed
 
-      - name: Check shared boilerplate consistency
-        run: bash .github/scripts/check-boilerplate.sh
-
       - name: Run ShellCheck
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY

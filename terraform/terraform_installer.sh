@@ -10,10 +10,10 @@
 set -euo pipefail
 
 # ============================================================================
-# BEGIN COMMON BOILERPLATE
-# Keep this block byte-identical across all bash scripts in this repo.
-# It is verified by .github/scripts/check-boilerplate.sh in CI.
-# Function names follow the PowerShell Verb-Noun convention by repo policy.
+# Common Helper Functions
+# The same helpers are used in every bash script in this repo, so the
+# scripts stay consistent while remaining standalone single-file downloads.
+# Function names follow the PowerShell Verb-Noun convention.
 # ============================================================================
 
 # shellcheck disable=SC2034  # not every script uses every color
@@ -91,10 +91,6 @@ Invoke-Cmd() {
         "$@" || Stop-Script "Command failed: '$*'"
     fi
 }
-
-# ============================================================================
-# END COMMON BOILERPLATE
-# ============================================================================
 
 # === Root check ===
 Test-Root

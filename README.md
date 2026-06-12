@@ -60,9 +60,9 @@ openSUSE (zypper) is not supported.
 
 ## Conventions
 
-- All bash scripts share an identical boilerplate block (logging, root check,
-  package-manager detection) defined in `.github/scripts/boilerplate.sh` and
-  enforced by CI (`.github/scripts/check-boilerplate.sh`).
+- All bash scripts are standalone single-file downloads. They share the same
+  set of helper functions (`Write-Log`, `Stop-Script`, `Get-PkgMgr`, ...),
+  copied into each script — keep them aligned when changing one.
 - Function names follow the PowerShell Verb-Noun convention everywhere — also
   in bash (`Write-Log`, `Get-PkgMgr`, `Install-Podman`). Hyphenated function
   names are bash-only syntax, so scripts must keep the bash shebang.
