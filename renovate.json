@@ -10,8 +10,7 @@
   "reviewersFromCodeOwners": true,
   "enabledManagers": [
     "github-actions",
-    "dockerfile",
-    "docker-compose",
+    "git-submodules",
     "custom.regex"
   ],
   "labels": [
@@ -31,16 +30,6 @@
   "packageRules": [
     {
       "matchManagers": [
-        "dockerfile",
-        "docker-compose"
-      ],
-      "groupName": "Docker images",
-      "addLabels": [
-        "docker"
-      ]
-    },
-    {
-      "matchManagers": [
         "github-actions"
       ],
       "groupName": "GitHub Actions",
@@ -49,12 +38,23 @@
       ]
     },
     {
+      "matchManagers": [
+        "git-submodules"
+      ],
+      "groupName": "testssl.sh submodule",
+      "addLabels": [
+        "submodules"
+      ],
+      "semanticCommitType": "deps",
+      "description": "Track the testssl.sh submodule (follows the branch configured in .gitmodules)"
+    },
+    {
       "semanticCommitType": "deps",
       "groupName": "nginx installer deps",
       "matchFileNames": [
         "nginx/**"
       ],
-      "description": "Groepeer alle nginx installer-afhankelijkheden in een PR",
+      "description": "Group all nginx installer dependencies into one PR",
       "matchManagers": [
         "custom.regex"
       ]
@@ -86,7 +86,7 @@
       "matchStrings": [
         "NGINX_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "NGINX versie in bash installer",
+      "description": "NGINX version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "nginx/nginx",
       "extractVersionTemplate": "^release-(?<version>.+)$",
@@ -99,7 +99,7 @@
       "matchStrings": [
         "\\$Script:NGINX_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "NGINX versie in PowerShell installer",
+      "description": "NGINX version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "nginx/nginx",
       "extractVersionTemplate": "^release-(?<version>.+)$",
@@ -112,7 +112,7 @@
       "matchStrings": [
         "PCRE2_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "PCRE2 versie in bash installer",
+      "description": "PCRE2 version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "PCRE2Project/pcre2",
       "extractVersionTemplate": "^pcre2-(?<version>.+)$",
@@ -125,7 +125,7 @@
       "matchStrings": [
         "\\$Script:PCRE2_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "PCRE2 versie in PowerShell installer",
+      "description": "PCRE2 version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "PCRE2Project/pcre2",
       "extractVersionTemplate": "^pcre2-(?<version>.+)$",
@@ -138,7 +138,7 @@
       "matchStrings": [
         "ZLIB_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "Zlib versie in bash installer",
+      "description": "Zlib version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "madler/zlib",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -151,7 +151,7 @@
       "matchStrings": [
         "\\$Script:ZLIB_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "Zlib versie in PowerShell installer",
+      "description": "Zlib version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "madler/zlib",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -164,7 +164,7 @@
       "matchStrings": [
         "HEADERS_MORE_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "headers-more-nginx-module versie in bash installer",
+      "description": "headers-more-nginx-module version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "openresty/headers-more-nginx-module",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -177,7 +177,7 @@
       "matchStrings": [
         "\\$Script:HEADERS_MORE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "headers-more-nginx-module versie in PowerShell installer",
+      "description": "headers-more-nginx-module version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "openresty/headers-more-nginx-module",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -190,7 +190,7 @@
       "matchStrings": [
         "ZSTD_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "zstd-nginx-module versie in bash installer",
+      "description": "zstd-nginx-module version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "tokers/zstd-nginx-module",
       "managerFilePatterns": [
@@ -202,7 +202,7 @@
       "matchStrings": [
         "\\$Script:ZSTD_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "zstd-nginx-module versie in PowerShell installer",
+      "description": "zstd-nginx-module version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "tokers/zstd-nginx-module",
       "managerFilePatterns": [
@@ -214,7 +214,7 @@
       "matchStrings": [
         "ACME_MODULE_VERSION=\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "nginx-acme versie in bash installer",
+      "description": "nginx-acme version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "nginx/nginx-acme",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -227,7 +227,7 @@
       "matchStrings": [
         "\\$Script:ACME_MODULE_VERSION\\s*=\\s*'(?<currentValue>[^']+)'"
       ],
-      "description": "nginx-acme versie in PowerShell installer",
+      "description": "nginx-acme version in the PowerShell installer",
       "customType": "regex",
       "depNameTemplate": "nginx/nginx-acme",
       "extractVersionTemplate": "^v(?<version>.+)$",
@@ -240,7 +240,7 @@
       "matchStrings": [
         "pip install ansible==(?<currentValue>[0-9.]+)"
       ],
-      "description": "Ansible versie in bash installer",
+      "description": "Ansible version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "ansible",
       "managerFilePatterns": [
@@ -252,7 +252,7 @@
       "matchStrings": [
         "K8S_VERSION:-(?<currentValue>v[0-9.]+)"
       ],
-      "description": "Kubernetes versie in bash installer",
+      "description": "Kubernetes version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "kubernetes/kubernetes",
       "managerFilePatterns": [
@@ -264,7 +264,7 @@
       "matchStrings": [
         "MINIKUBE_VERSION:-(?<currentValue>v[0-9.]+)"
       ],
-      "description": "Minikube versie in bash installer",
+      "description": "Minikube version in the bash installer",
       "customType": "regex",
       "depNameTemplate": "kubernetes/minikube",
       "managerFilePatterns": [
@@ -276,7 +276,7 @@
       "matchStrings": [
         "\\$VAGRANT_VERSION\\s*=\\s*\"(?<currentValue>[^\"]+)\""
       ],
-      "description": "Vagrant versie in Windows installer",
+      "description": "Vagrant version in the Windows installer",
       "customType": "regex",
       "depNameTemplate": "hashicorp/vagrant",
       "extractVersionTemplate": "^v(?<version>.+)$",
