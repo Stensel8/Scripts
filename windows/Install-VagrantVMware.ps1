@@ -1,9 +1,20 @@
-# Install-VagrantVMware.ps1
-# Automates the installation of VMware Workstation with Vagrant on Windows.
-# Note: vagrant-vmware-utility is bundled with Vagrant since v2.x
-# Credits: https://github.com/1eedaegon
-# Run as Administrator.
+<#
+.SYNOPSIS
+    Automates the installation of VMware Workstation with Vagrant on Windows.
+.DESCRIPTION
+    Installs Go, VMware Workstation Player and Vagrant via winget, installs
+    the vagrant-vmware-desktop plugin, then initialises and starts a test VM.
 
+    Note: vagrant-vmware-utility is bundled with Vagrant since v2.x.
+    Credits: https://github.com/1eedaegon
+.NOTES
+    Run as Administrator (the script self-elevates if needed).
+#>
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# Self-elevate when not running as Administrator
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Restarting the script with administrator rights..." -ForegroundColor Yellow
