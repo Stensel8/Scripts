@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# Terraform Installer Script
+# Reference copy of the common boilerplate block shared by all bash scripts
+# in this repo. This file is never sourced or executed — it only serves as
+# the canonical version that .github/scripts/check-boilerplate.sh compares
+# every script against.
 #
-# Installs Terraform from the HashiCorp repos on Debian/Ubuntu (apt) and
-# RHEL/Fedora (dnf), and from the community repos on Arch Linux (pacman).
-# Run as root.
+# To update the boilerplate: edit it here, then copy the block (markers
+# included) into every script that carries it.
 #
 
 set -euo pipefail
@@ -95,66 +97,3 @@ Invoke-Cmd() {
 # ============================================================================
 # END COMMON BOILERPLATE
 # ============================================================================
-
-# === Root check ===
-Test-Root
-
-# === Already installed? ===
-if command -v terraform >/dev/null 2>&1; then
-    Write-Log WARN "Terraform is already installed. Skipping installation."
-    exit 0
-fi
-
-# === Install ===
-PKG_MANAGER=$(Get-PkgMgr)
-case $PKG_MANAGER in
-    apt)
-        Write-Log INFO "APT-based system detected."
-
-        Write-Log INFO "Updating package lists..."
-        Invoke-Cmd apt-get update -y
-
-        Write-Log INFO "Installing prerequisites..."
-        Invoke-Cmd apt-get install -y gnupg software-properties-common curl
-
-        Write-Log INFO "Adding HashiCorp GPG key..."
-        curl -fsSL https://apt.releases.hashicorp.com/gpg | \
-            gpg --dearmor | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null || \
-            Stop-Script "Failed to add HashiCorp GPG key."
-
-        DISTRO_CODENAME=""
-        if [[ -r /etc/os-release ]]; then
-            # shellcheck disable=SC1091
-            DISTRO_CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
-        fi
-        [[ -n "$DISTRO_CODENAME" ]] || DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || true)
-        [[ -n "$DISTRO_CODENAME" ]] || Stop-Script "Could not determine the distribution codename."
-        Write-Log INFO "Adding HashiCorp repository for '${DISTRO_CODENAME}'..."
-        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${DISTRO_CODENAME} main" | \
-            tee /etc/apt/sources.list.d/hashicorp.list || Stop-Script "Failed to add HashiCorp repository."
-
-        Invoke-Cmd apt-get update -y
-        Invoke-Cmd apt-get install -y terraform
-        ;;
-
-    dnf)
-        Write-Log INFO "DNF-based system detected."
-
-        Invoke-Cmd dnf install -y dnf-plugins-core
-        dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo || \
-            Stop-Script "Failed to add HashiCorp repository."
-        Invoke-Cmd dnf install -y terraform
-        ;;
-
-    pacman)
-        Write-Log INFO "Pacman-based system detected."
-        # HashiCorp has no vendor repo for Arch; this is the community package.
-        Invoke-Cmd pacman -Syu --noconfirm terraform
-        ;;
-
-    *)
-        Stop-Script "Unsupported package manager. Only apt, dnf and pacman are supported."
-        ;;
-esac
-
-Write-Log SUCCESS "Terraform installation completed successfully!"
