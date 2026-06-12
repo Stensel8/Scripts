@@ -141,7 +141,16 @@ case $PKG_MANAGER in
         Write-Log INFO "DNF-based system detected."
 
         Invoke-Cmd dnf install -y dnf-plugins-core
-        dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo || \
+
+        # HashiCorp publishes separate repos for Fedora and RHEL-compatible distros
+        case $(Get-OsId) in
+            fedora) HASHICORP_REPO="https://rpm.releases.hashicorp.com/fedora/hashicorp.repo" ;;
+            *)      HASHICORP_REPO="https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo" ;;
+        esac
+
+        # dnf5 (Fedora 41+) and dnf4 (RHEL) use different config-manager syntax
+        dnf config-manager addrepo --overwrite --from-repofile="$HASHICORP_REPO" 2>/dev/null || \
+            dnf config-manager --add-repo "$HASHICORP_REPO" || \
             Stop-Script "Failed to add HashiCorp repository."
         Invoke-Cmd dnf install -y terraform
         ;;
