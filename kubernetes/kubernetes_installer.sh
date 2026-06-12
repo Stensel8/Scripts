@@ -34,7 +34,7 @@ run() {
 [ "$EUID" -ne 0 ] && error "Run as root (sudo)."
 
 # === Settings ===
-K8S_VERSION="${K8S_VERSION:-v1.36.1}"
+K8S_VERSION="${K8S_VERSION:-v1.36.2}"
 MINIKUBE_VERSION="${MINIKUBE_VERSION:-v1.38.1}"
 APT_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/deb/"
 RPM_BASE_URL="https://pkgs.k8s.io/core:/stable:/${K8S_VERSION}/rpm/"
