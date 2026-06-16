@@ -1,68 +1,165 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+#
+# Terraform Installer Script
+#
+# Installs Terraform from the HashiCorp repos on Debian/Ubuntu (apt) and
+# RHEL/Fedora (dnf), and from the community repos on Arch Linux (pacman).
+# Run as root.
+#
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+set -euo pipefail
 
-print_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-print_error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+# ============================================================================
+# Common Helper Functions
+# The same helpers are used in every bash script in this repo, so the
+# scripts stay consistent while remaining standalone single-file downloads.
+# Function names follow the PowerShell Verb-Noun convention.
+# ============================================================================
+
+# shellcheck disable=SC2034  # not every script uses every color
+readonly RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' \
+         BLUE='\033[0;34m' PURPLE='\033[0;35m' BOLD='\033[1m' NC='\033[0m'
+
+# Optional plain-text logfile; set LOG_FILE after this block to enable.
+LOG_FILE="${LOG_FILE:-}"
+
+# Usage: Write-Log <INFO|SUCCESS|WARN|ERROR|STEP> "message"
+Write-Log() {
+    local level=$1; shift
+    local color=$NC
+    case $level in
+        INFO)    color=$BLUE ;;
+        SUCCESS) color=$GREEN ;;
+        WARN)    color=$YELLOW ;;
+        ERROR)   color=$RED ;;
+        STEP)    color=$PURPLE ;;
+    esac
+    if [[ $level == ERROR ]]; then
+        echo -e "${color}[$level]${NC} $*" >&2
+    else
+        echo -e "${color}[$level]${NC} $*"
+    fi
+    if [[ -n "$LOG_FILE" ]]; then
+        echo "[$level] $*" >> "$LOG_FILE"
+    fi
+}
+
+# Usage: Stop-Script "fatal message"
+Stop-Script() {
+    Write-Log ERROR "$1"
+    exit 1
+}
+
+# Usage: Test-Root  (exits unless running as root)
+Test-Root() {
+    [[ $EUID -eq 0 ]] || Stop-Script "Run as root (sudo)."
+}
+
+# Usage: mgr=$(Get-PkgMgr)  ->  apt | dnf | pacman | unknown
+Get-PkgMgr() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: os_id=$(Get-OsId)  ->  lowercase /etc/os-release ID (ubuntu, debian,
+# fedora, arch, ...) or "unknown". Call in $(...) so sourcing stays contained.
+Get-OsId() {
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        local os_id="${ID:-unknown}"
+        echo "${os_id,,}"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: Invoke-Cmd command [args...]
+# Logs the command, sends its output to LOG_FILE when set, aborts on failure.
+Invoke-Cmd() {
+    Write-Log INFO "Executing: $*"
+    if [[ -n "$LOG_FILE" ]]; then
+        "$@" >> "$LOG_FILE" 2>&1 || Stop-Script "Command failed: '$*'. Check log: $LOG_FILE"
+    else
+        "$@" || Stop-Script "Command failed: '$*'"
+    fi
+}
 
 # === Root check ===
-[ "$EUID" -ne 0 ] && print_error "This script must be run as root or with sudo privileges."
+Test-Root
 
 # === Already installed? ===
 if command -v terraform >/dev/null 2>&1; then
-    print_warning "Terraform is already installed. Skipping installation."
+    Write-Log WARN "Terraform is already installed. Skipping installation."
     exit 0
 fi
 
-# === Detect package manager (dnf before yum) ===
-if command -v apt-get >/dev/null 2>&1; then
-    print_info "APT-based system detected."
+# === Install ===
+PKG_MANAGER=$(Get-PkgMgr)
+case $PKG_MANAGER in
+    apt)
+        Write-Log INFO "APT-based system detected."
 
-    print_info "Updating package lists..."
-    apt-get update -y
+        Write-Log INFO "Updating package lists..."
+        Invoke-Cmd apt-get update -y
 
-    print_info "Installing prerequisites..."
-    apt-get install -y gnupg software-properties-common curl || print_error "Failed to install prerequisites."
+        Write-Log INFO "Installing prerequisites..."
+        Invoke-Cmd apt-get install -y gnupg software-properties-common curl
 
-    print_info "Adding HashiCorp GPG key..."
-    curl -fsSL https://apt.releases.hashicorp.com/gpg | \
-        gpg --dearmor | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null || \
-        print_error "Failed to add HashiCorp GPG key."
+        Write-Log INFO "Adding HashiCorp GPG key..."
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | \
+            gpg --dearmor | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null || \
+            Stop-Script "Failed to add HashiCorp GPG key."
 
-    DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || echo "bookworm")
-    print_info "Adding HashiCorp repository for '${DISTRO_CODENAME}'..."
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${DISTRO_CODENAME} main" | \
-        tee /etc/apt/sources.list.d/hashicorp.list || print_error "Failed to add HashiCorp repository."
+        DISTRO_CODENAME=""
+        if [[ -r /etc/os-release ]]; then
+            # shellcheck disable=SC1091
+            DISTRO_CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+        fi
+        [[ -n "$DISTRO_CODENAME" ]] || DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || true)
+        [[ -n "$DISTRO_CODENAME" ]] || Stop-Script "Could not determine the distribution codename."
+        Write-Log INFO "Adding HashiCorp repository for '${DISTRO_CODENAME}'..."
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${DISTRO_CODENAME} main" | \
+            tee /etc/apt/sources.list.d/hashicorp.list || Stop-Script "Failed to add HashiCorp repository."
 
-    apt-get update -y
-    apt-get install -y terraform || print_error "Failed to install Terraform."
+        Invoke-Cmd apt-get update -y
+        Invoke-Cmd apt-get install -y terraform
+        ;;
 
-elif command -v dnf >/dev/null 2>&1; then
-    print_info "DNF-based system detected."
+    dnf)
+        Write-Log INFO "DNF-based system detected."
 
-    dnf install -y dnf-plugins-core || print_error "Failed to install dnf-plugins-core."
-    dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo || \
-        print_error "Failed to add HashiCorp repository."
-    dnf install -y terraform || print_error "Failed to install Terraform."
+        Invoke-Cmd dnf install -y dnf-plugins-core
 
-elif command -v yum >/dev/null 2>&1; then
-    print_info "YUM-based system detected."
+        # HashiCorp publishes separate repos for Fedora and RHEL-compatible distros
+        case $(Get-OsId) in
+            fedora) HASHICORP_REPO="https://rpm.releases.hashicorp.com/fedora/hashicorp.repo" ;;
+            *)      HASHICORP_REPO="https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo" ;;
+        esac
 
-    yum install -y yum-utils || print_error "Failed to install yum-utils."
-    yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo || \
-        print_error "Failed to add HashiCorp repository."
-    yum install -y terraform || print_error "Failed to install Terraform."
+        # dnf5 (Fedora 41+) and dnf4 (RHEL) use different config-manager syntax
+        dnf config-manager addrepo --overwrite --from-repofile="$HASHICORP_REPO" 2>/dev/null || \
+            dnf config-manager --add-repo "$HASHICORP_REPO" || \
+            Stop-Script "Failed to add HashiCorp repository."
+        Invoke-Cmd dnf install -y terraform
+        ;;
 
-else
-    print_error "Unsupported package manager."
-fi
+    pacman)
+        Write-Log INFO "Pacman-based system detected."
+        # HashiCorp has no vendor repo for Arch; this is the community package.
+        Invoke-Cmd pacman -Syu --noconfirm terraform
+        ;;
 
-print_success "Terraform installation completed successfully!"
+    *)
+        Stop-Script "Unsupported package manager. Only apt, dnf and pacman are supported."
+        ;;
+esac
+
+Write-Log SUCCESS "Terraform installation completed successfully!"

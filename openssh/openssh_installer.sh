@@ -22,48 +22,119 @@
 
 set -euo pipefail
 
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
-readonly NC='\033[0m'
-readonly BOLD='\033[1m'
+# ============================================================================
+# Common Helper Functions
+# The same helpers are used in every bash script in this repo, so the
+# scripts stay consistent while remaining standalone single-file downloads.
+# Function names follow the PowerShell Verb-Noun convention.
+# ============================================================================
 
-readonly BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
+# shellcheck disable=SC2034  # not every script uses every color
+readonly RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' \
+         BLUE='\033[0;34m' PURPLE='\033[0;35m' BOLD='\033[1m' NC='\033[0m'
+
+# Optional plain-text logfile; set LOG_FILE after this block to enable.
+LOG_FILE="${LOG_FILE:-}"
+
+# Usage: Write-Log <INFO|SUCCESS|WARN|ERROR|STEP> "message"
+Write-Log() {
+    local level=$1; shift
+    local color=$NC
+    case $level in
+        INFO)    color=$BLUE ;;
+        SUCCESS) color=$GREEN ;;
+        WARN)    color=$YELLOW ;;
+        ERROR)   color=$RED ;;
+        STEP)    color=$PURPLE ;;
+    esac
+    if [[ $level == ERROR ]]; then
+        echo -e "${color}[$level]${NC} $*" >&2
+    else
+        echo -e "${color}[$level]${NC} $*"
+    fi
+    if [[ -n "$LOG_FILE" ]]; then
+        echo "[$level] $*" >> "$LOG_FILE"
+    fi
+}
+
+# Usage: Stop-Script "fatal message"
+Stop-Script() {
+    Write-Log ERROR "$1"
+    exit 1
+}
+
+# Usage: Test-Root  (exits unless running as root)
+Test-Root() {
+    [[ $EUID -eq 0 ]] || Stop-Script "Run as root (sudo)."
+}
+
+# Usage: mgr=$(Get-PkgMgr)  ->  apt | dnf | pacman | unknown
+Get-PkgMgr() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: os_id=$(Get-OsId)  ->  lowercase /etc/os-release ID (ubuntu, debian,
+# fedora, arch, ...) or "unknown". Call in $(...) so sourcing stays contained.
+Get-OsId() {
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        local os_id="${ID:-unknown}"
+        echo "${os_id,,}"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: Invoke-Cmd command [args...]
+# Logs the command, sends its output to LOG_FILE when set, aborts on failure.
+Invoke-Cmd() {
+    Write-Log INFO "Executing: $*"
+    if [[ -n "$LOG_FILE" ]]; then
+        "$@" >> "$LOG_FILE" 2>&1 || Stop-Script "Command failed: '$*'. Check log: $LOG_FILE"
+    else
+        "$@" || Stop-Script "Command failed: '$*'"
+    fi
+}
+
+BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
+readonly BACKUP_DIR
 readonly CONFIG_FILE="/etc/ssh/sshd_config"
 readonly ORIGINAL_CONFIG="${CONFIG_FILE}.original"
 readonly LOG_DIR="/tmp/openssh-logs-$$"
 
-detect_ssh_service() {
+# The systemd unit is "ssh" on Debian/Ubuntu and "sshd" on RHEL/Fedora/Arch.
+# Prefer the installed unit; fall back to the package manager convention
+# (the unit only exists once openssh-server is installed).
+Get-SshService() {
     if systemctl list-unit-files | grep -q "^ssh\.service"; then
         echo "ssh"
     elif systemctl list-unit-files | grep -q "^sshd\.service"; then
         echo "sshd"
+    elif [[ $(Get-PkgMgr) == "apt" ]]; then
+        echo "ssh"
     else
-        command -v apt-get &>/dev/null && echo "ssh" || echo "sshd"
+        echo "sshd"
     fi
 }
 
-readonly SSH_SERVICE=$(detect_ssh_service)
+SSH_SERVICE=$(Get-SshService)
 mkdir -p "$LOG_DIR"
 
-log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_error()   { echo -e "${RED}[✗]${NC} $1" >&2; }
-log_warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
-log_step()    { echo -e "${PURPLE}[→]${NC} ${BOLD}$1${NC}"; }
-
-cleanup() {
+Remove-TempDir() {
     [ -n "$LOG_DIR" ] && [ -d "$LOG_DIR" ] && rm -rf "$LOG_DIR"
 }
-trap cleanup EXIT INT TERM
+trap Remove-TempDir EXIT INT TERM
 
-check_root() {
-    [ "$EUID" -eq 0 ] || { log_error "Run as root: sudo $0"; exit 1; }
-}
-
-print_header() {
+Show-Header() {
     echo
     echo -e "${BOLD}OpenSSH Hardened Configuration Installer${NC}"
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -72,43 +143,47 @@ print_header() {
     echo
 }
 
-install_openssh() {
-    log_step "Installing OpenSSH server"
-    if command -v apt-get &>/dev/null; then
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq &>"$LOG_DIR/apt-update.log"
-        apt-get install -y openssh-server &>"$LOG_DIR/apt-install.log"
-    elif command -v dnf &>/dev/null; then
-        dnf install -y openssh-server &>"$LOG_DIR/dnf-install.log"
-    elif command -v yum &>/dev/null; then
-        yum install -y openssh-server &>"$LOG_DIR/yum-install.log"
-    else
-        log_error "Unsupported package manager (requires apt, dnf, or yum)"
-        exit 1
-    fi
-    log_success "OpenSSH server installed"
+Install-OpenSsh() {
+    Write-Log STEP "Installing OpenSSH server"
+    case $(Get-PkgMgr) in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq &>"$LOG_DIR/apt-update.log"
+            apt-get install -y openssh-server &>"$LOG_DIR/apt-install.log"
+            ;;
+        dnf)
+            dnf install -y openssh-server &>"$LOG_DIR/dnf-install.log"
+            ;;
+        pacman)
+            pacman -Sy --noconfirm openssh &>"$LOG_DIR/pacman-install.log"
+            ;;
+        *)
+            Stop-Script "Unsupported package manager (requires apt, dnf, or pacman)"
+            ;;
+    esac
+    Write-Log SUCCESS "OpenSSH server installed"
 }
 
-backup_config() {
-    log_step "Backing up existing configuration"
+Backup-SshConfig() {
+    Write-Log STEP "Backing up existing configuration"
     mkdir -p "$BACKUP_DIR"
     [ -d "/etc/ssh" ] && cp -a /etc/ssh "$BACKUP_DIR/"
     [ -f "$CONFIG_FILE" ] && [ ! -f "$ORIGINAL_CONFIG" ] && cp "$CONFIG_FILE" "$ORIGINAL_CONFIG"
     systemctl is-active "$SSH_SERVICE" &>/dev/null \
         && echo "active"   > "$BACKUP_DIR/service_status.txt" \
         || echo "inactive" > "$BACKUP_DIR/service_status.txt"
-    log_success "Backup saved to $BACKUP_DIR"
+    Write-Log SUCCESS "Backup saved to $BACKUP_DIR"
 }
 
-generate_host_keys() {
-    log_step "Generating Ed25519 host key"
+New-HostKeys() {
+    Write-Log STEP "Generating Ed25519 host key"
 
     # Ed25519 — the only host key we need
     if [ ! -f "/etc/ssh/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q
-        log_info "Generated Ed25519 host key"
+        Write-Log INFO "Generated Ed25519 host key"
     else
-        log_info "Ed25519 host key already exists"
+        Write-Log INFO "Ed25519 host key already exists"
     fi
 
     # Remove weak legacy keys (RSA, ECDSA, DSA)
@@ -116,17 +191,17 @@ generate_host_keys() {
         if [ -f "/etc/ssh/ssh_host_${key_type}_key" ]; then
             rm -f "/etc/ssh/ssh_host_${key_type}_key" \
                   "/etc/ssh/ssh_host_${key_type}_key.pub"
-            log_info "Removed legacy $key_type host key"
+            Write-Log INFO "Removed legacy $key_type host key"
         fi
     done
 
     chmod 600 /etc/ssh/ssh_host_*_key
     chmod 644 /etc/ssh/ssh_host_*_key.pub
-    log_success "Host keys configured (Ed25519 only)"
+    Write-Log SUCCESS "Host keys configured (Ed25519 only)"
 }
 
-configure_ssh() {
-    log_step "Writing hardened SSH configuration"
+Set-SshConfig() {
+    Write-Log STEP "Writing hardened SSH configuration"
 
     # Write new configuration to a temporary file first, so we can validate it
     local tmp_config
@@ -279,7 +354,7 @@ EOF
     # Validate the new config before replacing the live one
     local validation_output
     if ! validation_output=$(sshd -t -f "$tmp_config" 2>&1); then
-        log_error "New configuration failed validation; original config left intact"
+        Write-Log ERROR "New configuration failed validation; original config left intact"
         echo "$validation_output" >&2
         rm -f "$tmp_config"
         return 1
@@ -291,36 +366,45 @@ EOF
     mkdir -p /run/sshd
     chmod 755 /run/sshd
 
-    log_success "SSH configuration written"
+    Write-Log SUCCESS "SSH configuration written"
 }
 
-configure_firewall() {
-    log_step "Configuring firewall"
-    if command -v firewall-cmd &>/dev/null; then
+Set-Firewall() {
+    Write-Log STEP "Configuring firewall"
+    # Check which firewall is actually ACTIVE, not merely installed: a Debian
+    # box can have firewalld installed while ufw is the one doing the work.
+    if systemctl is-active --quiet firewalld 2>/dev/null && command -v firewall-cmd &>/dev/null; then
         firewall-cmd --permanent --add-service=ssh &>/dev/null || true
         firewall-cmd --reload &>/dev/null || true
-        log_info "firewalld configured for SSH"
+        Write-Log INFO "firewalld configured for SSH"
+    elif command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow ssh &>/dev/null || true
+        Write-Log INFO "ufw configured for SSH"
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --add-service=ssh &>/dev/null || true
+        firewall-cmd --reload &>/dev/null || true
+        Write-Log INFO "firewalld configured for SSH (inactive)"
     elif command -v ufw &>/dev/null; then
         ufw allow ssh &>/dev/null || true
-        log_info "ufw configured for SSH"
+        Write-Log INFO "ufw configured for SSH (inactive)"
     else
-        log_warn "No firewall detected — ensure port 22 is accessible"
+        Write-Log WARN "No firewall detected — ensure port 22 is accessible"
     fi
-    log_success "Firewall done"
+    Write-Log SUCCESS "Firewall done"
 }
 
-test_configuration() {
-    log_step "Testing SSH configuration"
+Test-SshConfig() {
+    Write-Log STEP "Testing SSH configuration"
     if sshd -t 2>/dev/null; then
-        log_success "Configuration syntax valid"
+        Write-Log SUCCESS "Configuration syntax valid"
     else
-        log_error "Configuration has syntax errors:"
+        Write-Log ERROR "Configuration has syntax errors:"
         sshd -t
         return 1
     fi
 }
 
-show_summary() {
+Show-Summary() {
     local ssh_version
     ssh_version=$(ssh -V 2>&1 | awk '{print $1}' | tr -d ',')
 
@@ -358,123 +442,129 @@ show_summary() {
     echo
 }
 
-install() {
+Install-HardenedOpenSsh() {
     if [[ -n "${SSH_CONNECTION:-}" ]] && [[ "${FORCE_SSH_INSTALL:-}" != "1" ]]; then
-        log_error "Running in SSH session — this will modify SSH config."
-        log_warn "Use tmux/screen, or: FORCE_SSH_INSTALL=1 $0 install"
+        Write-Log ERROR "Running in SSH session — this will modify SSH config."
+        Write-Log WARN "Use tmux/screen, or: FORCE_SSH_INSTALL=1 $0 install"
         exit 1
     fi
 
     if [[ "${CONFIRM:-}" != "yes" ]]; then
         if [[ -t 0 ]]; then
             read -rp "Install hardened OpenSSH? This disables password auth. [y/N] " answer
-            [[ "${answer,,}" != "y" ]] && { log_error "Cancelled"; exit 0; }
+            [[ "${answer,,}" != "y" ]] && { Write-Log ERROR "Cancelled"; exit 0; }
         else
-            log_error "Non-interactive: use CONFIRM=yes $0 install"
+            Write-Log ERROR "Non-interactive: use CONFIRM=yes $0 install"
             exit 0
         fi
     fi
 
-    check_root
-    print_header
-    backup_config
-    install_openssh
-    generate_host_keys
-    configure_ssh
-    configure_firewall
-    test_configuration
+    Test-Root
+    Show-Header
+    Backup-SshConfig
+    Install-OpenSsh
+    # Re-detect now that the package (and thus the systemd unit) exists
+    SSH_SERVICE=$(Get-SshService)
+    New-HostKeys
+    Set-SshConfig
+    Set-Firewall
+    Test-SshConfig
     systemctl enable "$SSH_SERVICE"
     systemctl restart "$SSH_SERVICE"
-    show_summary
-    log_success "Done!"
+    Show-Summary
+    Write-Log SUCCESS "Done!"
 }
 
-remove() {
-    check_root
+Remove-OpenSsh() {
+    Test-Root
 
     if [[ "${CONFIRM:-}" != "yes" ]]; then
         if [[ -t 0 ]]; then
             read -rp "Remove OpenSSH server? [y/N] " answer
-            [[ "${answer,,}" != "y" ]] && { log_error "Cancelled"; exit 0; }
+            [[ "${answer,,}" != "y" ]] && { Write-Log ERROR "Cancelled"; exit 0; }
         else
-            log_error "Non-interactive: use CONFIRM=yes $0 remove"
+            Write-Log ERROR "Non-interactive: use CONFIRM=yes $0 remove"
             exit 0
         fi
     fi
 
     systemctl is-active --quiet "$SSH_SERVICE" && systemctl stop "$SSH_SERVICE" || true
     systemctl is-enabled --quiet "$SSH_SERVICE" && systemctl disable "$SSH_SERVICE" || true
-    [ -f "$ORIGINAL_CONFIG" ] && cp "$ORIGINAL_CONFIG" "$CONFIG_FILE" && log_info "Original config restored"
+    [ -f "$ORIGINAL_CONFIG" ] && cp "$ORIGINAL_CONFIG" "$CONFIG_FILE" && Write-Log INFO "Original config restored"
 
     local remove_failed=0
-    if command -v apt-get &>/dev/null; then
-        apt-get remove -y openssh-server &>/dev/null || { log_error "apt-get remove failed"; remove_failed=1; }
-    elif command -v dnf &>/dev/null; then
-        dnf remove -y openssh-server &>/dev/null || { log_error "dnf remove failed"; remove_failed=1; }
-    elif command -v yum &>/dev/null; then
-        yum remove -y openssh-server &>/dev/null || { log_error "yum remove failed"; remove_failed=1; }
-    fi
+    case $(Get-PkgMgr) in
+        apt)
+            apt-get remove -y openssh-server &>/dev/null || { Write-Log ERROR "apt-get remove failed"; remove_failed=1; }
+            ;;
+        dnf)
+            dnf remove -y openssh-server &>/dev/null || { Write-Log ERROR "dnf remove failed"; remove_failed=1; }
+            ;;
+        pacman)
+            pacman -Rns --noconfirm openssh &>/dev/null || { Write-Log ERROR "pacman remove failed"; remove_failed=1; }
+            ;;
+    esac
 
     if [ "$remove_failed" -eq 0 ]; then
-        log_success "OpenSSH removed. Backup: $BACKUP_DIR"
+        Write-Log SUCCESS "OpenSSH removed. Backup: $BACKUP_DIR"
     else
-        log_warn "OpenSSH removal encountered errors. Backup: $BACKUP_DIR"
+        Write-Log WARN "OpenSSH removal encountered errors. Backup: $BACKUP_DIR"
         return 1
     fi
 }
 
-verify() {
+Test-OpenSshInstallation() {
     local issues=0
 
     command -v sshd &>/dev/null \
-        && log_success "sshd found: $ssh_version=$(ssh -V 2>&1 | awk '{print $1}' | tr -d ',')" \
-        || { log_error "sshd not found"; ((issues++)); }
+        && Write-Log SUCCESS "sshd found: $(ssh -V 2>&1 | awk '{print $1}' | tr -d ',')" \
+        || { Write-Log ERROR "sshd not found"; issues=$((issues + 1)); }
 
     [ -f "$CONFIG_FILE" ] && sshd -t 2>/dev/null \
-        && log_success "Config syntax valid" \
-        || { log_error "Config invalid or missing"; ((issues++)); }
+        && Write-Log SUCCESS "Config syntax valid" \
+        || { Write-Log ERROR "Config invalid or missing"; issues=$((issues + 1)); }
 
-    systemctl is-active --quiet  "$SSH_SERVICE" && log_success "sshd running"  || log_warn "sshd not running"
-    systemctl is-enabled --quiet "$SSH_SERVICE" && log_success "sshd enabled"  || log_warn "sshd not enabled"
+    systemctl is-active --quiet  "$SSH_SERVICE" && Write-Log SUCCESS "sshd running"  || Write-Log WARN "sshd not running"
+    systemctl is-enabled --quiet "$SSH_SERVICE" && Write-Log SUCCESS "sshd enabled"  || Write-Log WARN "sshd not enabled"
 
     for key in /etc/ssh/ssh_host_*_key; do
-        [ -f "$key" ] && log_success "Host key: $(ssh-keygen -lf "$key" 2>/dev/null)"
+        [ -f "$key" ] && Write-Log SUCCESS "Host key: $(ssh-keygen -lf "$key" 2>/dev/null)"
     done
     if [ ! -f "/etc/ssh/ssh_host_ed25519_key" ]; then
-        log_error "Ed25519 host key not found"
-        ((issues++))
+        Write-Log ERROR "Ed25519 host key not found"
+        issues=$((issues + 1))
     fi
 
     if command -v ss &>/dev/null; then
         if ss -tlnp | grep -q :22; then
-            log_success "Listening on :22"
+            Write-Log SUCCESS "Listening on :22"
         else
-            log_warn "Not listening on :22"
+            Write-Log WARN "Not listening on :22"
         fi
     elif command -v netstat &>/dev/null; then
         if netstat -tlnp 2>/dev/null | grep -q ':22'; then
-            log_success "Listening on :22"
+            Write-Log SUCCESS "Listening on :22"
         else
-            log_warn "Not listening on :22"
+            Write-Log WARN "Not listening on :22"
         fi
     elif command -v lsof &>/dev/null; then
         if lsof -iTCP:22 -sTCP:LISTEN -nP &>/dev/null; then
-            log_success "Listening on :22"
+            Write-Log SUCCESS "Listening on :22"
         else
-            log_warn "Not listening on :22"
+            Write-Log WARN "Not listening on :22"
         fi
     else
-        log_warn "Cannot verify listening port :22 (no ss/netstat/lsof available)"
+        Write-Log WARN "Cannot verify listening port :22 (no ss/netstat/lsof available)"
     fi
 
-    [ $issues -eq 0 ] && log_success "Verification passed" || { log_error "$issues issue(s) found"; return 1; }
+    [ $issues -eq 0 ] && Write-Log SUCCESS "Verification passed" || { Write-Log ERROR "$issues issue(s) found"; return 1; }
 }
 
-main() {
+Invoke-Main() {
     case "${1:-help}" in
-        install) install ;;
-        remove)  remove  ;;
-        verify)  verify  ;;
+        install) Install-HardenedOpenSsh ;;
+        remove)  Remove-OpenSsh ;;
+        verify)  Test-OpenSshInstallation ;;
         *)
             echo
             echo -e "${BOLD}OpenSSH Hardened Configuration Installer${NC}"
@@ -493,4 +583,4 @@ main() {
     esac
 }
 
-main "$@"
+Invoke-Main "$@"

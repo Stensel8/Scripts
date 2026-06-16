@@ -15,11 +15,88 @@ set -euo pipefail
 #
 # ============================================================================
 
-# Early syntax check
-if ! bash -n "$0" >/dev/null 2>&1; then
-    echo "ERROR: Syntax check failed for $0" >&2
+# ============================================================================
+# Common Helper Functions
+# The same helpers are used in every bash script in this repo, so the
+# scripts stay consistent while remaining standalone single-file downloads.
+# Function names follow the PowerShell Verb-Noun convention.
+# ============================================================================
+
+# shellcheck disable=SC2034  # not every script uses every color
+readonly RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' \
+         BLUE='\033[0;34m' PURPLE='\033[0;35m' BOLD='\033[1m' NC='\033[0m'
+
+# Optional plain-text logfile; set LOG_FILE after this block to enable.
+LOG_FILE="${LOG_FILE:-}"
+
+# Usage: Write-Log <INFO|SUCCESS|WARN|ERROR|STEP> "message"
+Write-Log() {
+    local level=$1; shift
+    local color=$NC
+    case $level in
+        INFO)    color=$BLUE ;;
+        SUCCESS) color=$GREEN ;;
+        WARN)    color=$YELLOW ;;
+        ERROR)   color=$RED ;;
+        STEP)    color=$PURPLE ;;
+    esac
+    if [[ $level == ERROR ]]; then
+        echo -e "${color}[$level]${NC} $*" >&2
+    else
+        echo -e "${color}[$level]${NC} $*"
+    fi
+    if [[ -n "$LOG_FILE" ]]; then
+        echo "[$level] $*" >> "$LOG_FILE"
+    fi
+}
+
+# Usage: Stop-Script "fatal message"
+Stop-Script() {
+    Write-Log ERROR "$1"
     exit 1
-fi
+}
+
+# Usage: Test-Root  (exits unless running as root)
+Test-Root() {
+    [[ $EUID -eq 0 ]] || Stop-Script "Run as root (sudo)."
+}
+
+# Usage: mgr=$(Get-PkgMgr)  ->  apt | dnf | pacman | unknown
+Get-PkgMgr() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: os_id=$(Get-OsId)  ->  lowercase /etc/os-release ID (ubuntu, debian,
+# fedora, arch, ...) or "unknown". Call in $(...) so sourcing stays contained.
+Get-OsId() {
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        local os_id="${ID:-unknown}"
+        echo "${os_id,,}"
+    else
+        echo "unknown"
+    fi
+}
+
+# Usage: Invoke-Cmd command [args...]
+# Logs the command, sends its output to LOG_FILE when set, aborts on failure.
+Invoke-Cmd() {
+    Write-Log INFO "Executing: $*"
+    if [[ -n "$LOG_FILE" ]]; then
+        "$@" >> "$LOG_FILE" 2>&1 || Stop-Script "Command failed: '$*'. Check log: $LOG_FILE"
+    else
+        "$@" || Stop-Script "Command failed: '$*'"
+    fi
+}
 
 # ============================================================================
 # Version Configuration
@@ -75,23 +152,10 @@ ACME_MODULE_URL="https://github.com/nginx/nginx-acme/releases/download/v${ACME_M
 
 # Initialize logging
 mkdir -p "$(dirname "$LOG_FILE")" "$BUILD_DIR"
-exec > >(tee -a "$LOG_FILE")
-exec 2>&1
 
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-Write-Log() {
-    local level=$1
-    local msg=$2
-    echo "[$level] $msg" >&2
-}
-
-Stop-Script() {
-    Write-Log ERROR "$1"
-    exit 1
-}
 
 Test-Hash() {
     local file=$1
@@ -116,16 +180,29 @@ Get-File() {
     Test-Hash "$file" "$sha"
 }
 
-Detect-PkgMgr() {
-    if command -v apt-get >/dev/null 2>&1; then
-        echo "apt"
-    elif command -v dnf >/dev/null 2>&1; then
-        echo "dnf"
-    elif command -v pacman >/dev/null 2>&1; then
-        echo "pacman"
-    else
-        echo "unknown"
-    fi
+# Downloads rustup-init, verifies its published SHA256, then installs the
+# Rust toolchain. Replaces the old unverified `curl | sh` pattern.
+Install-Rustup() {
+    Write-Log INFO "Installing Rust toolchain via rustup-init"
+    local rustup_arch
+    rustup_arch="$(uname -m)-unknown-linux-gnu"
+    local rustup_url="https://static.rust-lang.org/rustup/dist/${rustup_arch}/rustup-init"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    curl -fsSL "$rustup_url" -o "$tmp_dir/rustup-init" || Stop-Script "Failed to download rustup-init"
+    curl -fsSL "${rustup_url}.sha256" -o "$tmp_dir/rustup-init.sha256" || Stop-Script "Failed to download rustup-init checksum"
+
+    local expected actual
+    expected=$(cut -d' ' -f1 "$tmp_dir/rustup-init.sha256")
+    actual=$(sha256sum "$tmp_dir/rustup-init" | awk '{print $1}')
+    [[ -n "$expected" && "$actual" == "$expected" ]] || Stop-Script "rustup-init checksum verification failed"
+
+    chmod +x "$tmp_dir/rustup-init"
+    "$tmp_dir/rustup-init" -y >/dev/null 2>&1 || Stop-Script "rustup installation failed"
+    rm -rf "$tmp_dir"
+    # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
 }
 
 # ============================================================================
@@ -133,14 +210,14 @@ Detect-PkgMgr() {
 # ============================================================================
 
 Install-Dependencies() {
-    [[ $EUID -eq 0 ]] || Stop-Script "Run as root"
+    Test-Root
     command -v curl >/dev/null 2>&1 || Stop-Script "curl required"
-    
+
     Write-Log INFO "Installing build dependencies"
-    
+
     local mgr
-    mgr=$(Detect-PkgMgr)
-    
+    mgr=$(Get-PkgMgr)
+
     case $mgr in
         apt)
             export DEBIAN_FRONTEND=noninteractive
@@ -163,20 +240,19 @@ Install-Dependencies() {
     # Verify cargo availability
     if ! command -v cargo >/dev/null 2>&1; then
         Write-Log WARN "Cargo not found. Installing rustup..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
+        Install-Rustup
     fi
     
     Write-Log INFO "Dependencies installed"
 }
 
 Update-SystemPackages() {
-    [[ $EUID -eq 0 ]] || Stop-Script "Run as root"
+    Test-Root
 
     Write-Log INFO "Updating system packages"
 
     local mgr
-    mgr=$(Detect-PkgMgr)
+    mgr=$(Get-PkgMgr)
 
     case $mgr in
         apt)
@@ -309,6 +385,7 @@ Build-Nginx() {
         --add-dynamic-module="$BUILD_DIR/headers-more" \
         --add-dynamic-module="$BUILD_DIR/zstd-module" \
         2>&1); then
+        printf '%s\n' "$output" >> "$LOG_FILE"
         Write-Log ERROR "Configure output: $(echo "$output" | tail -20)"
         Stop-Script "Configure failed"
     fi
@@ -320,6 +397,7 @@ Build-Nginx() {
     fi
     
     if ! output=$(make -j"$(nproc)" 2>&1); then
+        printf '%s\n' "$output" >> "$LOG_FILE"
         Write-Log ERROR "Make output: $(echo "$output" | tail -20)"
         Stop-Script "Build failed"
     fi
@@ -338,12 +416,12 @@ Build-Nginx() {
     # Verify Rust toolchain
     if ! command -v rustc >/dev/null 2>&1; then
         Write-Log WARN "rustc not found, installing rustup"
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
+        Install-Rustup
     fi
     
     local cargo_output
     if ! cargo_output=$(cargo build --release 2>&1); then
+        printf '%s\n' "$cargo_output" >> "$LOG_FILE"
         Write-Log ERROR "ACME build failed: $(echo "$cargo_output" | tail -20)"
         Stop-Script "ACME module build failed"
     fi
@@ -559,6 +637,7 @@ Install-Nginx() {
     cd "$BUILD_DIR/nginx" || Stop-Script "Cannot cd to $BUILD_DIR/nginx"
     local output
     if ! output=$(make install 2>&1); then
+        printf '%s\n' "$output" >> "$LOG_FILE"
         Write-Log ERROR "Install output: $(echo "$output" | tail -10)"
         Stop-Script "Nginx install failed"
     fi

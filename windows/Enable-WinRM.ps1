@@ -1,5 +1,19 @@
-# WinRM configuration script
-# Run as Administrator
+<#
+.SYNOPSIS
+    Configures WinRM for remote management.
+.DESCRIPTION
+    Enables PowerShell Remoting, creates an HTTP listener on port 5985 if
+    one does not exist yet, and adds the matching inbound firewall rule.
+    Warns when a network connection is set to Public.
+.NOTES
+    Run as Administrator.
+#>
+
+#Requires -RunAsAdministrator
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
 Clear-Host
 
 # --- Step 1: Check Network Profiles and Warn for Public Networks ---
