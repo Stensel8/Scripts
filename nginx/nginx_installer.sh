@@ -103,7 +103,7 @@ Invoke-Cmd() {
 # ============================================================================
 
 # NGINX
-NGINX_VERSION="1.31.2"
+NGINX_VERSION="1.31.3"
 NGINX_SHA256="af2a957c41da636ddc4f883e4523c6d140b4784dbce42000c364ae5092aa473c"
 
 # PCRE2
