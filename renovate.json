@@ -45,11 +45,11 @@
       "addLabels": [
         "submodules"
       ],
-      "semanticCommitType": "deps",
+      "semanticCommitType": "chore",
       "description": "Track the testssl.sh submodule (follows the branch configured in .gitmodules)"
     },
     {
-      "semanticCommitType": "deps",
+      "semanticCommitType": "chore",
       "groupName": "nginx installer deps",
       "matchFileNames": [
         "nginx/**"
@@ -60,7 +60,7 @@
       ]
     },
     {
-      "semanticCommitType": "deps",
+      "semanticCommitType": "chore",
       "groupName": "ansible installer deps",
       "matchFileNames": [
         "ansible/**"
@@ -70,7 +70,7 @@
       ]
     },
     {
-      "semanticCommitType": "deps",
+      "semanticCommitType": "chore",
       "groupName": "kubernetes installer deps",
       "matchFileNames": [
         "kubernetes/**"
